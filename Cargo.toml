@@ -1,0 +1,28 @@
+[package]
+name = "bip38"
+version = "0.1.0"
+authors = ["ceca69ec8e1bcad6c6d79e1dcf7214ff67766580a62b7d19a6fb094c97b4f2dc"]
+edition = "2018"
+include = [
+	"src/*",
+	"Cargo.toml",
+	"README.md"
+]
+description = "Encrypt and decrypt bitcoin private keys with bip-0038 standard"
+documentation = "https://docs.rs/bip38"
+homepage = "https://crates.io/crates/bip38"
+repository = "https://github.com/ceca69ec/bip38"
+keywords = ["bip-0038", "bitcoin", "decryption", "encryption"]
+categories = ["cryptography"]
+license = "Apache-2.0"
+readme = "README.md"
+
+[dependencies]
+aes = "0.7.4"
+bs58 = "0.4.0"
+rand = "0.8.4"
+ripemd160 = "0.9.1"
+scrypt = { version = "0.7.0", default-features = false }
+secp256k1 = "0.20.3"
+sha2 = "0.9.5"
+unicode-normalization = "0.1.19"
