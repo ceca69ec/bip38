@@ -1,6 +1,6 @@
 //! Encrypt and decrypt bitcoin private keys with bip-0038 standard.
 
-// TODO: documentation of 'encrypt', 'encrypt_ec' and main page
+// TODO: doc on main page
 
 use aes::Aes256;
 use aes::cipher::{
@@ -38,7 +38,7 @@ const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
 ///
 /// The only errors that are intended to be treated are:
 ///
-/// `Base58`, `Checksum`, `EncKey`, `Passwd`.
+/// `Base58`, `Checksum`, `EncKey`, `Passwd`, PrvKey.
 ///
 /// All others are just for safety in case of something unexpected happens.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd)]
@@ -84,12 +84,12 @@ trait BytesManipulation {
 /// Allow decryption of bitcoin encrypted private keys in `srt` format.
 pub trait Decrypt {
     /// Decrypt an encrypted bitcoin private key in `str`format (both non-ec and ec).
-    /// 
+    ///
     /// This function targets strings with the version prefix `6P` and returns a tuple
-    /// containing the decrypted private key (`[u8; 32]`) and a boolean indication of if this private
-    /// key is intended to result in a compressed public key or not. So, if the return is `true`,
-    /// create an compressed public key (33 bytes), in case of `false`, use the full 65 bytes of the
-    /// public key.
+    /// containing the decrypted private key (`[u8; 32]`) and a boolean indication of if this
+    /// private key is intended to result in a compressed public key or not. So, if the return is
+    /// `true`, create an compressed public key (33 bytes), in case of `false`, use the full 65
+    /// bytes of the public key.
     ///
     /// # Examples
     ///
@@ -125,8 +125,9 @@ pub trait Decrypt {
     ///
     /// `Error::EncKey` is returned if the target `str` is not an valid encrypted private key.
     ///
-    /// `Error::Checksum` is returned if the target `str` has valid encrypted private key format but invalid checksum.
-    /// 
+    /// `Error::Checksum` is returned if the target `str` has valid encrypted private key format
+    /// but invalid checksum.
+    ///
     /// `Error::Base58` is returned if an non `base58` character is found.
     ///
     /// ```
@@ -156,19 +157,76 @@ pub trait Decrypt {
     ///     Error::Base58
     /// );
     /// ```
+    ///
+    /// # Passphrase
+    ///
+    /// This function handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
+    /// ```
+    /// use bip38::Decrypt;
+    ///
+    /// assert!(
+    ///     "6PRW5o9FLp4gJDDVqJQKJFTpMvdsSGJxMYHtHaQBF3ooa8mwD69bapcDQn"
+    ///         .decrypt("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}").is_ok()
+    /// );
+    /// ```
     fn decrypt(&self, pass: &str) -> Result<([u8; 32], bool), Error>;
 }
 
-/// Public trait to allow encryption of private keys in [u8; 32] format.
+/// Allow encryption of bitcoin private keys in `[u8; 32]` format.
 pub trait Encrypt {
-    /// Encrypt private key.
-    /// TODO: example tests
-    fn encrypt(
-        &self,
-        pass: &str,
-        compress: bool
-    ) -> Result<(String, Vec<u8>), Error>;
-
+    /// Encrypt a bitcoin private key in the format of `[u8; 32]` (without elliptic curve
+    /// multiplication) into a `String` of 58 base58 characters.
+    ///
+    /// When decrypting the boolean flag `compress` is just an indication, but here it influences
+    /// on the resulting prefix of the encrypted private key and obviously on the indication when
+    /// decrypting, but not in the private key itself.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use bip38::Encrypt;
+    ///
+    /// assert_eq!(
+    ///     [0x11; 32].encrypt("weakPass", true).unwrap(),
+    ///     "6PYMgbeR6XCsX4yJx8E52vW4PJDoTiu1QeFLn81KoW6Shye5DZ4ZnDauno"
+    /// );
+    /// assert_eq!(
+    ///     [0x11; 32].encrypt("weakPass", false).unwrap(),
+    ///     "6PRVo8whL3QbdrXpKk3gP2dGuxDbuvMsMqUq2imVigrm8oyRbvBoRUsbB3"
+    /// );
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// The only case this function can fail by itself is if the provided private key could not
+    /// result in a bitcoin address. All other errors are here for safety and are related to
+    /// dependencies. This function don't `unwrap` internally to let the decision to do or not to
+    /// the developer using the crate.
+    ///
+    /// ```
+    /// use bip38::{Encrypt, Error};
+    ///
+    /// assert_eq!([0x00; 32].encrypt("oh_no!", true).unwrap_err(), Error::PrvKey);
+    /// assert_eq!([0xff; 32].encrypt("oh_no!", true).unwrap_err(), Error::PrvKey);
+    /// ```
+    ///
+    /// # Passphrase
+    ///
+    /// This function handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
+    /// ```
+    /// use bip38::Encrypt;
+    ///
+    /// assert_eq!(
+    ///     [
+    ///         0x64, 0xee, 0xab, 0x5f, 0x9b, 0xe2, 0xa0, 0x1a, 0x83, 0x65, 0xa5, 0x79,
+    ///         0x51, 0x1e, 0xb3, 0x37, 0x3c, 0x87, 0xc4, 0x0d, 0xa6, 0xd2, 0xa2, 0x5f,
+    ///         0x05, 0xbd, 0xa6, 0x8f, 0xe0, 0x77, 0xb6, 0x6e
+    ///     ].encrypt("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}", false).unwrap(),
+    ///     "6PRW5o9FLp4gJDDVqJQKJFTpMvdsSGJxMYHtHaQBF3ooa8mwD69bapcDQn"
+    /// );
+    /// ```
+    fn encrypt(&self, pass: &str, compress: bool) -> Result<String, Error>;
 }
 
 /// Internal trait to manipulate private keys (32 bytes).
@@ -263,13 +321,8 @@ impl Decrypt for str {
 
 impl Encrypt for [u8; 32] {
     #[inline]
-    fn encrypt(
-        &self,
-        pass: &str,
-        compress: bool
-    ) -> Result<(String, Vec<u8>), Error> {
-        let pubk = self.public(compress)?;
-        let address = pubk.p2wpkh()?;
+    fn encrypt(&self, pass: &str, compress: bool) -> Result<String, Error> {
+        let address = self.public(compress)?.p2wpkh()?;
         let checksum = &address.as_bytes().hash256()[..4];
         let mut scrypt_key = [0x00; 64];
 
@@ -302,7 +355,7 @@ impl Encrypt for [u8; 32] {
         buffer[7..23].copy_from_slice(&part1);
         buffer[23..].copy_from_slice(&part2);
 
-        Ok((buffer.encode_base58ck(), pubk))
+        Ok(buffer.encode_base58ck())
     }
 }
 
@@ -461,12 +514,46 @@ impl StringManipulation for str {
     }
 }
 
-/// Encrypt private key based on passphrase with ec multiply.
-/// TODO: example tests
-pub fn encrypt_ec(
-    pass: &str,
-    compress: bool
-) -> Result<(String, Vec<u8>), Error> {
+/// Create an encrypted private key in the form of a `String` of 58 base58 characters based on a
+/// passphrase (using elliptic curve multiplication).
+///
+/// This function don't receives a private key, it's generated internally as specified in
+/// `bip-0038`. The resulting private key is only know if the encrypted private key is decrypted.
+/// So the result is, by design, always impressible.
+/// 
+/// When decrypting the boolean flag `compress` is just an indication, but here it influences
+/// on the resulting prefix of the encrypted private key and obviously on the indication when
+/// decrypting, but not in the private key itself.
+///
+/// # Examples
+///
+/// Basic usage:
+/// ```
+/// use bip38::{encrypt_ec, Decrypt};
+///
+/// assert!(encrypt_ec("バンドメイド", true).unwrap().decrypt("バンドメイド").is_ok());
+/// assert!(encrypt_ec("strongPass", false).unwrap().decrypt("strongPass").is_ok());
+/// ```
+///
+/// # Errors
+///
+/// The only case this function can fail by itself is if the generated private key could not result
+/// in a bitcoin address. In this case the function results in `Error::PrvKey`. All other errors
+/// are here for safety and are related to dependencies. This function don't `unwrap` internally to
+/// let the decision to do or not to the developer using the crate.
+///
+/// # Passphrase
+///
+/// This function handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
+/// ```
+/// use bip38::{encrypt_ec, Decrypt};
+///
+/// assert!(
+///     encrypt_ec("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}", true).unwrap()
+///         .decrypt("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}").is_ok()
+/// );
+/// ```
+pub fn encrypt_ec(pass: &str, compress: bool) -> Result<String, Error> {
     let mut owner_salt = [0x00; 8];
     let mut pass_factor = [0x00; 32];
     let mut seed_b = [0x00; 24];
@@ -548,7 +635,7 @@ pub fn encrypt_ec(
     result_bytes[15..23].copy_from_slice(&encrypted_part1[..8]);
     result_bytes[23..].copy_from_slice(&encrypted_part2);
 
-    Ok((result_bytes.encode_base58ck(), pubk.to_vec()))
+    Ok(result_bytes.encode_base58ck())
 }
 
 #[cfg(test)]
@@ -659,7 +746,7 @@ mod tests {
         for (idx, key) in TV_KEY[..5].iter().enumerate() {
             if idx > 2 { compress = true }
             assert_eq!(
-                key.encrypt(TV_PASS[idx], compress).unwrap().0,
+                key.encrypt(TV_PASS[idx], compress).unwrap(),
                 TV_ENCRYPTED[idx]
             );
         }
@@ -668,20 +755,20 @@ mod tests {
     #[test]
     fn test_encrypt_ec() {
         assert!(
-            encrypt_ec("バンドメイド", true).unwrap().0
+            encrypt_ec("バンドメイド", true).unwrap()
                 .decrypt("バンドメイド").is_ok()
         );
         assert!(
-            encrypt_ec("バンドメイド", false).unwrap().0
-                .decrypt("バンドメイド").is_ok()
+            encrypt_ec("super_secret_passphrase", false).unwrap()
+                .decrypt("super_secret_passphrase").is_ok()
         );
         assert_eq!(
-            encrypt_ec("something_really_dumb", true).unwrap().0
+            encrypt_ec("something_really_dumb", true).unwrap()
                 .decrypt("rocket_science").unwrap_err(),
             Error::Passwd
         );
         assert_eq!(
-            encrypt_ec("a", false).unwrap().0 .decrypt("b").unwrap_err(),
+            encrypt_ec("a", false).unwrap().decrypt("b").unwrap_err(),
             Error::Passwd
         );
     }
@@ -748,7 +835,7 @@ mod tests {
                 0x88, 0x99, 0xf2, 0xbc, 0xb4, 0xbf, 0x69, 0x83, 0x18, 0x7f,
                 0x38, 0x0e, 0x72, 0xfc, 0x7d, 0xee, 0x11, 0x5b, 0x1f, 0x99,
                 0x57, 0xcc, 0x72, 0x9d, 0xd9, 0x76, 0x13, 0x1c, 0x4c, 0x8e,
-                0x12, 0xab, 0x10, 0x83, 0xca, 0x06, 0x54, 0xca, 0x5f, 0xdb, 
+                0x12, 0xab, 0x10, 0x83, 0xca, 0x06, 0x54, 0xca, 0x5f, 0xdb,
                 0xca, 0xc8, 0xd3, 0x19, 0x8d, 0xaf, 0x90, 0xf5, 0x81, 0xb5,
                 0x91, 0xd5, 0x63, 0x79, 0xca
             ].p2wpkh().unwrap(),
@@ -795,7 +882,7 @@ mod tests {
                 0x88, 0x99, 0xf2, 0xbc, 0xb4, 0xbf, 0x69, 0x83, 0x18, 0x7f,
                 0x38, 0x0e, 0x72, 0xfc, 0x7d, 0xee, 0x11, 0x5b, 0x1f, 0x99,
                 0x57, 0xcc, 0x72, 0x9d, 0xd9, 0x76, 0x13, 0x1c, 0x4c, 0x8e,
-                0x12, 0xab, 0x10, 0x83, 0xca, 0x06, 0x54, 0xca, 0x5f, 0xdb, 
+                0x12, 0xab, 0x10, 0x83, 0xca, 0x06, 0x54, 0xca, 0x5f, 0xdb,
                 0xca, 0xc8, 0xd3, 0x19, 0x8d, 0xaf, 0x90, 0xf5, 0x81, 0xb5,
                 0x91, 0xd5, 0x63, 0x79, 0xca
             ]
