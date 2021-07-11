@@ -1,6 +1,6 @@
 //! Encrypt and decrypt bitcoin private keys with bip-0038 standard.
 
-// TODO: returning tuple; documentation
+// TODO: documentation of 'encrypt', 'encrypt_ec' and main page
 
 use aes::Aes256;
 use aes::cipher::{
@@ -22,13 +22,25 @@ const NBBY_PUBC: usize = 33;
 /// Number of bytes of a public key uncompressed.
 const NBBY_PUBU: usize = 65;
 
+/// Number of base58 characters on every encrypted private key.
+const NBCH_EKEY: usize = 58;
+
 /// Prefix of all ec encrypted keys.
 const PRE_EC: [u8; 2] = [0x01, 0x43];
+
+/// Prefix of all private keys encrypted with bip-0038 standard.
+const PRE_EKEY: &str = "6P";
 
 /// Prefix of all non ec encrypted keys.
 const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
 
-/// Errors of 'bip38' crate
+/// Errors of `bip38` crate.
+///
+/// The only errors that are intended to be treated are:
+///
+/// `Base58`, `Checksum`, `EncKey`, `Passwd`.
+///
+/// All others are just for safety in case of something unexpected happens.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd)]
 pub enum Error {
     /// If an invalid base 58 string is processed.
@@ -69,18 +81,16 @@ trait BytesManipulation {
     fn p2wpkh(&self) -> Result<String, Error>;
 }
 
-/// Public trait to allow decryption of encrypted private keys in srt format.
+/// Allow decryption of bitcoin encrypted private keys in `srt` format.
 pub trait Decrypt {
-    /// Decrypt an encrypted private key.
+    /// Decrypt an encrypted bitcoin private key in `str`format (both non-ec and ec).
     /// 
-    /// # Errors
+    /// This function targets strings with the version prefix `6P` and returns a tuple
+    /// containing the decrypted private key (`[u8; 32]`) and a boolean indication of if this private
+    /// key is intended to result in a compressed public key or not. So, if the return is `true`,
+    /// create an compressed public key (33 bytes), in case of `false`, use the full 65 bytes of the
+    /// public key.
     ///
-    /// If an invalid passphrase is inserted the error `Error::Passwd` is returned.
-    ///
-    /// If the target `str` is not an valid encrypted private key, returns `Error::EncKey`.
-    ///
-    /// If the target `str` has valid encrypted private key format but with invalid checksum, returns `Error::Checksum`.
-    /// 
     /// # Examples
     ///
     /// Basic usage:
@@ -88,7 +98,63 @@ pub trait Decrypt {
     /// ```
     /// use bip38::Decrypt;
     ///
-    /// let prvk = "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq".decrypt("Satoshi");
+    /// // decryption of non elliptic curve multiplication ones
+    /// assert_eq!(
+    ///     "6PYMgbeR6XCsX4yJx8E52vW4PJDoTiu1QeFLn81KoW6Shye5DZ4ZnDauno".decrypt("weakPass")
+    ///         .unwrap(),
+    ///     ([0x11; 32], true) // compress the public key of this private key
+    /// );
+    /// assert_eq!(
+    ///     "6PRVo8whL3QbdrXpKk3gP2dGuxDbuvMsMqUq2imVigrm8oyRbvBoRUsbB3".decrypt("weakPass")
+    ///         .unwrap(),
+    ///     ([0x11; 32], false) // do not compress the public key
+    /// );
+    ///
+    /// // decryption of elliptic curve multiplication ones
+    /// assert!(
+    ///     "6PnPQGcDuPhCMmXzTebiryx8zHxr8PZvUJccSxarn9nLHVLX7yVj6Wcoj9".decrypt("weakPass").is_ok()
+    /// );
+    /// assert!(
+    ///     "6PfVV4eYCodt6tRiHbHH356MX818xZvcN54oNd1rCr8Cbme3273xWAgBhx".decrypt("notWeak?").is_ok()
+    /// );
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// `Error::Passwd` is returned if an invalid passphrase is inserted.
+    ///
+    /// `Error::EncKey` is returned if the target `str` is not an valid encrypted private key.
+    ///
+    /// `Error::Checksum` is returned if the target `str` has valid encrypted private key format but invalid checksum.
+    /// 
+    /// `Error::Base58` is returned if an non `base58` character is found.
+    ///
+    /// ```
+    /// use bip38::{Decrypt, Error};
+    ///
+    /// assert!(
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq".decrypt("Satoshi").is_ok()
+    /// );
+    /// assert_eq!(
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq".decrypt("Nakamoto")
+    ///         .unwrap_err(),
+    ///     Error::Passwd
+    /// );
+    /// assert_eq!(
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByQ".decrypt("Satoshi") // <- Q
+    ///         .unwrap_err(),
+    ///     Error::Checksum
+    /// );
+    /// assert_eq!(
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy".decrypt("Satoshi") // <- q?
+    ///         .unwrap_err(),
+    ///     Error::EncKey
+    /// );
+    /// assert_eq!(
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy!".decrypt("Satoshi") // <- !
+    ///         .unwrap_err(),
+    ///     Error::Base58
+    /// );
     /// ```
     fn decrypt(&self, pass: &str) -> Result<([u8; 32], bool), Error>;
 }
@@ -181,7 +247,10 @@ impl Decrypt for str {
     #[inline]
     fn decrypt(&self, pass: &str) -> Result<([u8; 32], bool), Error> {
         Ok(
-            if self.decode_base58ck()?[..2] == PRE_NON_EC {
+            if self.len() != NBCH_EKEY ||
+                (self.is_char_boundary(2) && &self[..2] != PRE_EKEY) {
+                return Err(Error::EncKey);
+            } else if self.decode_base58ck()?[..2] == PRE_NON_EC {
                 self.decrypt_non_ec(pass)?
             } else if self.decode_base58ck()?[..2] == PRE_EC {
                 self.decrypt_ec(pass)?
@@ -486,7 +555,7 @@ pub fn encrypt_ec(
 mod tests {
     use super::*;
     /// Encrypted secret keys obtained on test vectors of bip-0038.
-    const TV_38_ENCRYPTED: [&str; 9] = [
+    const TV_ENCRYPTED: [&str; 9] = [
         "6PRVWUbkzzsbcVac2qwfssoUJAN1Xhrg6bNk8J7Nzm5H7kxEbn2Nh2ZoGg",
         "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq",
         "6PRW5o9FLp4gJDDVqJQKJFTpMvdsSGJxMYHtHaQBF3ooa8mwD69bapcDQn",
@@ -499,7 +568,7 @@ mod tests {
     ];
 
     /// Resulting keys obtained in test vectors of bip-0038.
-    const TV_38_KEY: [[u8; 32]; 9] = [
+    const TV_KEY: [[u8; 32]; 9] = [
     [
         0xcb, 0xf4, 0xb9, 0xf7, 0x04, 0x70, 0x85, 0x6b, 0xb4, 0xf4, 0x0f, 0x80,
         0xb8, 0x7e, 0xdb, 0x90, 0x86, 0x59, 0x97, 0xff, 0xee, 0x6d, 0xf3, 0x15,
@@ -547,7 +616,7 @@ mod tests {
     ]];
 
     /// Passphrases obtained on test vectors of bip-0038.
-    const TV_38_PASS: [&str; 9] = [
+    const TV_PASS: [&str; 9] = [
         "TestingOneTwoThree", "Satoshi",
         "\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}", "TestingOneTwoThree",
         "Satoshi", "TestingOneTwoThree", "Satoshi", "MOLON LABE", "ΜΟΛΩΝ ΛΑΒΕ"
@@ -556,16 +625,25 @@ mod tests {
     #[test]
     fn test_decrypt() {
         let mut compress = false;
-        for (idx, ekey) in TV_38_ENCRYPTED.iter().enumerate() {
+        for (idx, ekey) in TV_ENCRYPTED.iter().enumerate() {
             if idx > 2 { compress = true }
             if idx > 4 { compress = false }
             assert_eq!(
-                ekey.decrypt(TV_38_PASS[idx]).unwrap(),
-                (TV_38_KEY[idx], compress)
+                ekey.decrypt(TV_PASS[idx]).unwrap(),
+                (TV_KEY[idx], compress)
             );
         }
+        assert!(TV_ENCRYPTED[1].decrypt("Satoshi").is_ok());
         assert_eq!(
-            TV_38_ENCRYPTED[0].decrypt("wrong").unwrap_err(), Error::Passwd
+            TV_ENCRYPTED[1].decrypt("wrong").unwrap_err(), Error::Passwd
+        );
+        assert_eq!(
+            TV_ENCRYPTED[1].replace("X", "x").decrypt("Satoshi").unwrap_err(),
+            Error::Checksum
+        );
+        assert_eq!(
+            TV_ENCRYPTED[1][1..].decrypt("Satoshi").unwrap_err(),
+            Error::EncKey
         );
     }
 
@@ -578,11 +656,11 @@ mod tests {
     #[test]
     fn test_encrypt() {
         let mut compress = false;
-        for (idx, key) in TV_38_KEY[..5].iter().enumerate() {
+        for (idx, key) in TV_KEY[..5].iter().enumerate() {
             if idx > 2 { compress = true }
             assert_eq!(
-                key.encrypt(TV_38_PASS[idx], compress).unwrap().0,
-                TV_38_ENCRYPTED[idx]
+                key.encrypt(TV_PASS[idx], compress).unwrap().0,
+                TV_ENCRYPTED[idx]
             );
         }
     }
