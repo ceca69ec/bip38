@@ -1,12 +1,121 @@
 //! Encrypt and decrypt bitcoin private keys with bip-0038 standard.
 //!
-//! # crates.io
+//! # Basic examples
+//!
+//! Encryption:
+//! ```
+//! use bip38::{Encrypt, Error};
+//!
+//! // true => compress
+//! assert_eq!(
+//!     [0x11; 32].encrypt("strong_pass", true).unwrap(),
+//!     "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2"
+//! );
+//!
+//! // false => uncompress
+//! assert_eq!(
+//!     [0x11; 32].encrypt("strong_pass", false).unwrap(),
+//!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2"
+//! );
+//!
+//! // [0x00; 32] is an invalid private key and could not generate a valid bitcoin address
+//! assert_eq!([0x00; 32].encrypt("strong_pass", true), Err(Error::PrvKey));
+//! assert_eq!([0x00; 32].encrypt("strong_pass", false), Err(Error::PrvKey));
+//! ```
+//!
+//! Decryption:
+//! ```
+//! use bip38::{Decrypt, Error};
+//!
+//! assert_eq!(
+//!     "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2".decrypt("strong_pass"),
+//!     Ok(([0x11; 32], true)) // compress
+//! );
+//!
+//! assert_eq!(
+//!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2".decrypt("strong_pass"),
+//!     Ok(([0x11; 32], false)) // uncompress
+//! );
+//!
+//! assert_eq!(
+//!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2".decrypt("wrong_pass"),
+//!     Err(Error::Pass)
+//! );
+//! ```
+//!
+//! Generation (not deterministic):
+//! ```
+//! use bip38::{Decrypt, Generate};
+//!
+//! // true => compress
+//! assert!("passphrase".generate(true).unwrap().decrypt("passphrase").is_ok());
+//!
+//! // false => uncompress
+//! assert!("passphrase".generate(false).unwrap().decrypt("passphrase").is_ok());
+//! ```
+//!
+//! # Normalization
+//!
+//! This crate handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
+//! ```
+//! use bip38::Decrypt;
+//!
+//! assert!(
+//!     "6PnY3GDoikMoVsA2EWqDHMrbAmSPH6Ycmh6aL5nqpuTqPu81A7bQCywDKq".decrypt("バンドメイド").is_ok()
+//! );
+//! ```
+//!
+//! # Testing
+//! 
+//! Please always run `cargo test --release`. The encryption algorithm is, by design, heavy on cpu.
+//! Without the optimizations of a release build running tests can consume long time.
+//!
+//! # Using
 //!
 //! You can use this crate in your project by adding the following to your `Cargo.toml`:
 //!
 //! ```toml
 //! [dependencies]
 //! bip38 = "0.1.0"
+//! ```
+//! Decrypting:
+//! ```
+//! use bip38::Decrypt;
+//!
+//! let user_ekey = "6PnVMRLWZnQQGjLJPnzGnBM2hBwvT8padAsHToFXwhZBFQF1e6nckKXFG9";
+//! let user_pass = "ultra_secret_pass";
+//!
+//! let (private_key, compress) = user_ekey.decrypt(user_pass).unwrap_or_else(|err| {
+//!     eprintln!("{}", err); // in case of invalid passphrase or invalid encrypted private key
+//!     std::process::exit(1);
+//! });
+//! ```
+//!
+//! Encrypting:
+//! ```
+//! use bip38::Encrypt;
+//!
+//! let internal_prv_key = [0x42; 32];
+//! let user_pass = "not_good_pass";
+//!
+//! let encrypted_prv_key = internal_prv_key.encrypt(user_pass, true).unwrap_or_else(|err| {
+//!     eprintln!("{}", err); // if the private key could not become a valid bitcoin address
+//!     std::process::exit(1);
+//! });
+//! // true to indicate the compression of the public key of this private key (33 bytes)
+//! ```
+//!
+//! Generating:
+//! ```
+//! use bip38::Generate;
+//!
+//! let user_pass = "a_good_pass_please";
+//!
+//! let encrypted_prv_key = user_pass.generate(false).unwrap_or_else(|err| {
+//!     eprintln!("{}", err); // if the generated private key could not become an address (rare)
+//!     std::process::exit(1);
+//! });
+//! // false to indicate the use of the public key of this private key uncompressed (65 bytes)
 //! ```
 
 // TODO: doc on main page
