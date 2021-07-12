@@ -1,4 +1,13 @@
 //! Encrypt and decrypt bitcoin private keys with bip-0038 standard.
+//!
+//! # crates.io
+//!
+//! You can use this crate in your project by adding the following to your `Cargo.toml`:
+//!
+//! ```toml
+//! [dependencies]
+//! bip38 = "0.1.0"
+//! ```
 
 // TODO: doc on main page
 
@@ -38,7 +47,7 @@ const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
 ///
 /// The only errors that are intended to be treated are:
 ///
-/// `Base58`, `Checksum`, `EncKey`, `Passwd`, PrvKey.
+/// `Base58`, `Checksum`, `EncKey`, `Pass`, PrvKey.
 ///
 /// All others are just for safety in case of something unexpected happens.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd)]
@@ -54,7 +63,7 @@ pub enum Error {
     /// Invalid number of public key bytes.
     NbPubB,
     /// Found invalid passphrase.
-    Passwd,
+    Pass,
     /// Invalid private key found (could not generate address).
     PrvKey,
     /// Found invalid public key.
@@ -65,7 +74,6 @@ pub enum Error {
     ScryptParam,
 }
 
-// TODO: show only public functions on documentation
 /// Internal Functions to manipulate an arbitrary number of bytes [u8].
 trait BytesManipulation {
     /// Encode informed data in base 58 check.
@@ -85,11 +93,11 @@ trait BytesManipulation {
 pub trait Decrypt {
     /// Decrypt an encrypted bitcoin private key in `str`format (both non-ec and ec).
     ///
-    /// This function targets strings with the version prefix `6P` and returns a tuple
-    /// containing the decrypted private key (`[u8; 32]`) and a boolean indication of if this
-    /// private key is intended to result in a compressed public key or not. So, if the return is
-    /// `true`, create an compressed public key (33 bytes), in case of `false`, use the full 65
-    /// bytes of the public key.
+    /// This function targets strings of 58 base58 characters with the version prefix `6P` and
+    /// returns a tuple containing the decrypted private key (`[u8; 32]`) and a boolean indication
+    /// of if this private key is intended to result in a compressed public key or not. So, if the
+    /// flag is `true`, create an compressed public key (33 bytes), in case of `false`, use the
+    /// full 65 bytes of the public key.
     ///
     /// # Examples
     ///
@@ -98,19 +106,19 @@ pub trait Decrypt {
     /// ```
     /// use bip38::Decrypt;
     ///
-    /// // decryption of non elliptic curve multiplication ones
+    /// // decryption of non elliptic curve multiplication
     /// assert_eq!(
     ///     "6PYMgbeR6XCsX4yJx8E52vW4PJDoTiu1QeFLn81KoW6Shye5DZ4ZnDauno".decrypt("weakPass")
     ///         .unwrap(),
-    ///     ([0x11; 32], true) // compress the public key of this private key
+    ///     ([0x11; 32], true) // indication to compress the public key of this private key
     /// );
     /// assert_eq!(
     ///     "6PRVo8whL3QbdrXpKk3gP2dGuxDbuvMsMqUq2imVigrm8oyRbvBoRUsbB3".decrypt("weakPass")
     ///         .unwrap(),
-    ///     ([0x11; 32], false) // do not compress the public key
+    ///     ([0x11; 32], false) // indication do not compress the public key
     /// );
     ///
-    /// // decryption of elliptic curve multiplication ones
+    /// // decryption of elliptic curve multiplication
     /// assert!(
     ///     "6PnPQGcDuPhCMmXzTebiryx8zHxr8PZvUJccSxarn9nLHVLX7yVj6Wcoj9".decrypt("weakPass").is_ok()
     /// );
@@ -121,7 +129,7 @@ pub trait Decrypt {
     ///
     /// # Errors
     ///
-    /// `Error::Passwd` is returned if an invalid passphrase is inserted.
+    /// `Error::Pass` is returned if an invalid passphrase is inserted.
     ///
     /// `Error::EncKey` is returned if the target `str` is not an valid encrypted private key.
     ///
@@ -139,7 +147,7 @@ pub trait Decrypt {
     /// assert_eq!(
     ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq".decrypt("Nakamoto")
     ///         .unwrap_err(),
-    ///     Error::Passwd
+    ///     Error::Pass
     /// );
     /// assert_eq!(
     ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByQ".decrypt("Satoshi") // <- Q
@@ -229,6 +237,51 @@ pub trait Encrypt {
     fn encrypt(&self, pass: &str, compress: bool) -> Result<String, Error>;
 }
 
+/// Allow generation of encrypted private keys using elliptic curve multiplication.
+pub trait Generate {
+    /// Create an encrypted private key in the form of a `String` of 58 base58 characters based on
+    /// a passphrase (using elliptic curve multiplication and pseudo-random number generation).
+    ///
+    /// This function don't receives a private key, it's generated internally as specified in
+    /// `bip-0038`. The target string is the passphrase to be used to decrypt. The resulting
+    /// private key is only know if the encrypted private key is decrypted. So the result is,
+    /// by design, not deterministic.
+    /// 
+    /// When decrypting the boolean flag `compress` is just an indication, but here it influences
+    /// on the resulting prefix of the encrypted private key and obviously on the indication when
+    /// decrypting, but not in the private key itself.
+    ///
+    /// # Examples
+    ///
+    /// Basic usage:
+    /// ```
+    /// use bip38::{Decrypt, Generate};
+    ///
+    /// assert!("バンドメイド".generate(true).unwrap().decrypt("バンドメイド").is_ok());
+    /// assert!("kurupo!".generate(false).unwrap().decrypt("kurupo!").is_ok());
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// The only case this function can fail by itself is if the generated private key could not
+    /// result in a bitcoin address. In this case the function results in `Error::PrvKey`. All
+    /// other errors are here for safety and are related to dependencies. This function don't
+    /// `unwrap` internally to let the decision to do or not to the developer using the crate.
+    ///
+    /// # Passphrase
+    ///
+    /// This function handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
+    /// ```
+    /// use bip38::{Decrypt, Generate};
+    ///
+    /// assert!(
+    ///     "\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}".generate(true).unwrap()
+    ///         .decrypt("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}").is_ok()
+    /// );
+    /// ```
+    fn generate(&self, compress: bool) -> Result<String, Error>;
+}
+
 /// Internal trait to manipulate private keys (32 bytes).
 trait PrivateKeyManipulation {
     /// Generate secp256k1 point based on target secret key.
@@ -255,7 +308,7 @@ impl std::fmt::Display for Error {
             Error::EcMul => write!(f, "invalid elliptic curve multiplication"),
             Error::EncKey => write!(f, "invalid encrypted private key"),
             Error::NbPubB => write!(f, "invalid number of public key bytes"),
-            Error::Passwd => write!(f, "invalid passphrase"),
+            Error::Pass => write!(f, "invalid passphrase"),
             Error::PrvKey => write!(f, "invalid private key"),
             Error::PubKey => write!(f, "invalid public key"),
             Error::ScryptFn => write!(f, "failure on scrypt function"),
@@ -356,6 +409,94 @@ impl Encrypt for [u8; 32] {
         buffer[23..].copy_from_slice(&part2);
 
         Ok(buffer.encode_base58ck())
+    }
+}
+
+impl Generate for str {
+    #[inline]
+    fn generate(&self, compress: bool) -> Result<String, Error> {
+        let mut owner_salt = [0x00; 8];
+        let mut pass_factor = [0x00; 32];
+        let mut seed_b = [0x00; 24];
+
+        rand::thread_rng().fill_bytes(&mut owner_salt);
+
+        scrypt::scrypt(
+            self.nfc().collect::<String>().as_bytes(),
+            &owner_salt,
+            &Params::new(14, 8, 8).map_err(|_| Error::ScryptParam)?,
+            &mut pass_factor
+        ).map_err(|_| Error::ScryptFn)?;
+
+        let pass_point = pass_factor.public(true)?;
+
+        let mut pass_point_mul = PublicKey::from_slice(&pass_point)
+            .map_err(|_| Error::PubKey)?;
+
+        rand::thread_rng().fill_bytes(&mut seed_b);
+
+        let factor_b = seed_b.hash256();
+
+        pass_point_mul.mul_assign(&Secp256k1::new(), &factor_b)
+            .map_err(|_| Error::EcMul)?;
+
+        let pubk: Vec<u8> = if compress {
+            pass_point_mul.serialize().to_vec()
+        } else {
+            pass_point_mul.serialize_uncompressed().to_vec()
+        };
+
+        let address = pubk.p2wpkh()?;
+        let address_hash = &address.as_bytes().hash256()[..4];
+        let mut salt = [0x00; 12];
+        let mut seed_b_pass = [0x00; 64];
+
+        salt[..4].copy_from_slice(address_hash);
+        salt[4..].copy_from_slice(&owner_salt);
+
+        scrypt::scrypt(
+            &pass_point,
+            &salt,
+            &Params::new(10, 1, 1).map_err(|_| Error::ScryptParam)?,
+            &mut seed_b_pass
+        ).map_err(|_| Error::ScryptFn)?;
+
+        let derived_half1 = &seed_b_pass[..32];
+        let derived_half2 = &seed_b_pass[32..];
+        let en_p1 = &mut seed_b[..16];
+
+        for idx in 0..16 {
+            en_p1[idx] ^= derived_half1[idx];
+        }
+
+        let cipher = Aes256::new(GenericArray::from_slice(derived_half2));
+        let mut encrypted_part1 = GenericArray::clone_from_slice(en_p1);
+
+        cipher.encrypt_block(&mut encrypted_part1);
+
+        let mut en_p2 = [0x00; 16];
+        en_p2[..8].copy_from_slice(&encrypted_part1[8..]);
+        en_p2[8..].copy_from_slice(&seed_b[16..]);
+
+        for idx in 0..16 {
+            en_p2[idx] ^= derived_half1[idx + 16];
+        }
+
+        let mut encrypted_part2 = GenericArray::clone_from_slice(&en_p2);
+
+        cipher.encrypt_block(&mut encrypted_part2);
+
+        let flag = if compress { 0x20 } else { 0x00 };
+
+        let mut result_bytes = [0x00; 39];
+        result_bytes[..2].copy_from_slice(&PRE_EC);
+        result_bytes[2] = flag;
+        result_bytes[3..7].copy_from_slice(address_hash);
+        result_bytes[7..15].copy_from_slice(&owner_salt);
+        result_bytes[15..23].copy_from_slice(&encrypted_part1[..8]);
+        result_bytes[23..].copy_from_slice(&encrypted_part2);
+
+        Ok(result_bytes.encode_base58ck())
     }
 }
 
@@ -469,7 +610,7 @@ impl StringManipulation for str {
         let address = result.public(compress)?.p2wpkh()?;
         let checksum = &address.as_bytes().hash256()[..4];
 
-        if checksum != address_hash { return Err(Error::Passwd) }
+        if checksum != address_hash { return Err(Error::Pass) }
 
         Ok((result, compress))
     }
@@ -508,134 +649,10 @@ impl StringManipulation for str {
         let address = prvk.public(compress)?.p2wpkh()?;
         let checksum = &address.as_bytes().hash256()[..4];
 
-        if checksum != &eprvk[3..7] { return Err(Error::Passwd) }
+        if checksum != &eprvk[3..7] { return Err(Error::Pass) }
 
         Ok((prvk, compress))
     }
-}
-
-/// Create an encrypted private key in the form of a `String` of 58 base58 characters based on a
-/// passphrase (using elliptic curve multiplication).
-///
-/// This function don't receives a private key, it's generated internally as specified in
-/// `bip-0038`. The resulting private key is only know if the encrypted private key is decrypted.
-/// So the result is, by design, always impressible.
-/// 
-/// When decrypting the boolean flag `compress` is just an indication, but here it influences
-/// on the resulting prefix of the encrypted private key and obviously on the indication when
-/// decrypting, but not in the private key itself.
-///
-/// # Examples
-///
-/// Basic usage:
-/// ```
-/// use bip38::{encrypt_ec, Decrypt};
-///
-/// assert!(encrypt_ec("バンドメイド", true).unwrap().decrypt("バンドメイド").is_ok());
-/// assert!(encrypt_ec("strongPass", false).unwrap().decrypt("strongPass").is_ok());
-/// ```
-///
-/// # Errors
-///
-/// The only case this function can fail by itself is if the generated private key could not result
-/// in a bitcoin address. In this case the function results in `Error::PrvKey`. All other errors
-/// are here for safety and are related to dependencies. This function don't `unwrap` internally to
-/// let the decision to do or not to the developer using the crate.
-///
-/// # Passphrase
-///
-/// This function handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
-/// ```
-/// use bip38::{encrypt_ec, Decrypt};
-///
-/// assert!(
-///     encrypt_ec("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}", true).unwrap()
-///         .decrypt("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}").is_ok()
-/// );
-/// ```
-pub fn encrypt_ec(pass: &str, compress: bool) -> Result<String, Error> {
-    let mut owner_salt = [0x00; 8];
-    let mut pass_factor = [0x00; 32];
-    let mut seed_b = [0x00; 24];
-
-    rand::thread_rng().fill_bytes(&mut owner_salt);
-
-    scrypt::scrypt(
-        pass.nfc().collect::<String>().as_bytes(),
-        &owner_salt,
-        &Params::new(14, 8, 8).map_err(|_| Error::ScryptParam)?,
-        &mut pass_factor
-    ).map_err(|_| Error::ScryptFn)?;
-
-    let pass_point = pass_factor.public(true)?;
-
-    let mut pass_point_mul = PublicKey::from_slice(&pass_point)
-        .map_err(|_| Error::PubKey)?;
-
-    rand::thread_rng().fill_bytes(&mut seed_b);
-
-    let factor_b = seed_b.hash256();
-
-    pass_point_mul.mul_assign(&Secp256k1::new(), &factor_b)
-        .map_err(|_| Error::EcMul)?;
-
-    let pubk: Vec<u8> = if compress {
-        pass_point_mul.serialize().to_vec()
-    } else {
-        pass_point_mul.serialize_uncompressed().to_vec()
-    };
-
-    let address = pubk.p2wpkh()?;
-    let address_hash = &address.as_bytes().hash256()[..4];
-    let mut salt = [0x00; 12];
-    let mut seed_b_pass = [0x00; 64];
-
-    salt[..4].copy_from_slice(address_hash);
-    salt[4..].copy_from_slice(&owner_salt);
-
-    scrypt::scrypt(
-        &pass_point,
-        &salt,
-        &Params::new(10, 1, 1).map_err(|_| Error::ScryptParam)?,
-        &mut seed_b_pass
-    ).map_err(|_| Error::ScryptFn)?;
-
-    let derived_half1 = &seed_b_pass[..32];
-    let derived_half2 = &seed_b_pass[32..];
-    let en_p1 = &mut seed_b[..16];
-
-    for idx in 0..16 {
-        en_p1[idx] ^= derived_half1[idx];
-    }
-
-    let cipher = Aes256::new(GenericArray::from_slice(derived_half2));
-    let mut encrypted_part1 = GenericArray::clone_from_slice(en_p1);
-
-    cipher.encrypt_block(&mut encrypted_part1);
-
-    let mut en_p2 = [0x00; 16];
-    en_p2[..8].copy_from_slice(&encrypted_part1[8..]);
-    en_p2[8..].copy_from_slice(&seed_b[16..]);
-
-    for idx in 0..16 {
-        en_p2[idx] ^= derived_half1[idx + 16];
-    }
-
-    let mut encrypted_part2 = GenericArray::clone_from_slice(&en_p2);
-
-    cipher.encrypt_block(&mut encrypted_part2);
-
-    let flag = if compress { 0x20 } else { 0x00 };
-
-    let mut result_bytes = [0x00; 39];
-    result_bytes[..2].copy_from_slice(&PRE_EC);
-    result_bytes[2] = flag;
-    result_bytes[3..7].copy_from_slice(address_hash);
-    result_bytes[7..15].copy_from_slice(&owner_salt);
-    result_bytes[15..23].copy_from_slice(&encrypted_part1[..8]);
-    result_bytes[23..].copy_from_slice(&encrypted_part2);
-
-    Ok(result_bytes.encode_base58ck())
 }
 
 #[cfg(test)]
@@ -722,7 +739,7 @@ mod tests {
         }
         assert!(TV_ENCRYPTED[1].decrypt("Satoshi").is_ok());
         assert_eq!(
-            TV_ENCRYPTED[1].decrypt("wrong").unwrap_err(), Error::Passwd
+            TV_ENCRYPTED[1].decrypt("wrong").unwrap_err(), Error::Pass
         );
         assert_eq!(
             TV_ENCRYPTED[1].replace("X", "x").decrypt("Satoshi").unwrap_err(),
@@ -753,23 +770,22 @@ mod tests {
     }
 
     #[test]
-    fn test_encrypt_ec() {
+    fn test_generate() {
         assert!(
-            encrypt_ec("バンドメイド", true).unwrap()
+            "バンドメイド".generate(true).unwrap()
                 .decrypt("バンドメイド").is_ok()
         );
         assert!(
-            encrypt_ec("super_secret_passphrase", false).unwrap()
-                .decrypt("super_secret_passphrase").is_ok()
+            "kurupo!".generate(false).unwrap().decrypt("kurupo!").is_ok()
         );
         assert_eq!(
-            encrypt_ec("something_really_dumb", true).unwrap()
+            "something_really_dumb".generate(true).unwrap()
                 .decrypt("rocket_science").unwrap_err(),
-            Error::Passwd
+            Error::Pass
         );
         assert_eq!(
-            encrypt_ec("a", false).unwrap().decrypt("b").unwrap_err(),
-            Error::Passwd
+            "a".generate(false).unwrap().decrypt("b").unwrap_err(),
+            Error::Pass
         );
     }
 
