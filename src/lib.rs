@@ -1,4 +1,9 @@
-//! Encrypt and decrypt bitcoin private keys with bip-0038 standard.
+//! Encrypt and decrypt bitcoin private keys with
+//! [bip-0038](https://github.com/bitcoin/bips/blob/master/bip-0038.mediawiki) standard.
+//!
+//! This crate treat bitcoin private keys as raw 32 bytes (`[u8; 32]`). Hexadecimal, wif or any
+//! other representation (excepting the resulting encrypted private keys) are out of scope of this
+//! implementation.
 //!
 //! # Basic examples
 //!
@@ -18,7 +23,7 @@
 //!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2"
 //! );
 //!
-//! // [0x00; 32] is an invalid private key and could not generate a valid bitcoin address
+//! // [0x00; 32] is an invalid private key and cannot generate a valid bitcoin address
 //! assert_eq!([0x00; 32].encrypt("strong_pass", true), Err(Error::PrvKey));
 //! assert_eq!([0x00; 32].encrypt("strong_pass", false), Err(Error::PrvKey));
 //! ```
@@ -43,7 +48,7 @@
 //! );
 //! ```
 //!
-//! Generation (not deterministic):
+//! Generation (elliptic curve multiplication method, not deterministic):
 //! ```
 //! use bip38::{Decrypt, Generate};
 //!
@@ -58,26 +63,28 @@
 //!
 //! This crate handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
 //! ```
-//! use bip38::Decrypt;
+//! use bip38::{Decrypt, Encrypt};
 //!
-//! assert!(
-//!     "6PnY3GDoikMoVsA2EWqDHMrbAmSPH6Ycmh6aL5nqpuTqPu81A7bQCywDKq".decrypt("バンドメイド").is_ok()
+//! assert_eq!(
+//!     [0xba; 32].encrypt("バンドメイド", true).unwrap().decrypt("バンドメイド").unwrap(),
+//!     ([0xba; 32], true)
 //! );
 //! ```
 //!
 //! # Testing
-//! 
+//!
 //! Please always run `cargo test --release`. The encryption algorithm is, by design, heavy on cpu.
 //! Without the optimizations of a release build running tests can consume long time.
 //!
-//! # Using
+//! # Usage
 //!
 //! You can use this crate in your project by adding the following to your `Cargo.toml`:
 //!
 //! ```toml
 //! [dependencies]
-//! bip38 = "0.1.0"
+//! bip38 = "1.0.0"
 //! ```
+//!
 //! Decrypting:
 //! ```
 //! use bip38::Decrypt;
@@ -154,11 +161,11 @@ const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
 
 /// Errors of `bip38` crate.
 ///
-/// The only errors that are intended to be treated are:
+/// The only errors that are intended to be handle are:
 ///
-/// `Base58`, `Checksum`, `EncKey`, `Pass`, PrvKey.
+/// `Base58`, `Checksum`, `EncKey`, `Pass`, `PrvKey`.
 ///
-/// All others are just for safety in case of something unexpected happens.
+/// All others exist for safety in case of something unexpected happens with dependencies.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd)]
 pub enum Error {
     /// If an invalid base 58 string is processed.
@@ -177,9 +184,9 @@ pub enum Error {
     PrvKey,
     /// Found invalid public key.
     PubKey,
-    /// Trowed if an error occurs when using scrypt function.
+    /// Trowed if an error occurs when using `scrypt` function.
     ScryptFn,
-    /// Trowed if an invalid scrypt Param is inserted.
+    /// Trowed if an invalid `scrypt` parameter is used.
     ScryptParam,
 }
 
@@ -254,24 +261,20 @@ pub trait Decrypt {
     ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq".decrypt("Satoshi").is_ok()
     /// );
     /// assert_eq!(
-    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq".decrypt("Nakamoto")
-    ///         .unwrap_err(),
-    ///     Error::Pass
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq".decrypt("Nakamoto"),
+    ///     Err(Error::Pass)
     /// );
     /// assert_eq!(
-    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByQ".decrypt("Satoshi") // <- Q
-    ///         .unwrap_err(),
-    ///     Error::Checksum
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByQ".decrypt("Satoshi"), // <- Q
+    ///     Err(Error::Checksum)
     /// );
     /// assert_eq!(
-    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy".decrypt("Satoshi") // <- q?
-    ///         .unwrap_err(),
-    ///     Error::EncKey
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy".decrypt("Satoshi"), // <- q?
+    ///     Err(Error::EncKey)
     /// );
     /// assert_eq!(
-    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy!".decrypt("Satoshi") // <- !
-    ///         .unwrap_err(),
-    ///     Error::Base58
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy!".decrypt("Satoshi"), // <- !
+    ///     Err(Error::Base58)
     /// );
     /// ```
     ///
@@ -324,8 +327,8 @@ pub trait Encrypt {
     /// ```
     /// use bip38::{Encrypt, Error};
     ///
-    /// assert_eq!([0x00; 32].encrypt("oh_no!", true).unwrap_err(), Error::PrvKey);
-    /// assert_eq!([0xff; 32].encrypt("oh_no!", true).unwrap_err(), Error::PrvKey);
+    /// assert_eq!([0x00; 32].encrypt("oh_no!", true), Err(Error::PrvKey));
+    /// assert_eq!([0xff; 32].encrypt("oh_no!", true), Err(Error::PrvKey));
     /// ```
     ///
     /// # Passphrase
@@ -355,7 +358,7 @@ pub trait Generate {
     /// `bip-0038`. The target string is the passphrase to be used to decrypt. The resulting
     /// private key is only know if the encrypted private key is decrypted. So the result is,
     /// by design, not deterministic.
-    /// 
+    ///
     /// When decrypting the boolean flag `compress` is just an indication, but here it influences
     /// on the resulting prefix of the encrypted private key and obviously on the indication when
     /// decrypting, but not in the private key itself.
@@ -848,15 +851,15 @@ mod tests {
         }
         assert!(TV_ENCRYPTED[1].decrypt("Satoshi").is_ok());
         assert_eq!(
-            TV_ENCRYPTED[1].decrypt("wrong").unwrap_err(), Error::Pass
+            TV_ENCRYPTED[1].decrypt("wrong"), Err(Error::Pass)
         );
         assert_eq!(
-            TV_ENCRYPTED[1].replace("X", "x").decrypt("Satoshi").unwrap_err(),
-            Error::Checksum
+            TV_ENCRYPTED[1].replace("X", "x").decrypt("Satoshi"),
+            Err(Error::Checksum)
         );
         assert_eq!(
-            TV_ENCRYPTED[1][1..].decrypt("Satoshi").unwrap_err(),
-            Error::EncKey
+            TV_ENCRYPTED[1][1..].decrypt("Satoshi"),
+            Err(Error::EncKey)
         );
     }
 
@@ -889,13 +892,10 @@ mod tests {
         );
         assert_eq!(
             "something_really_dumb".generate(true).unwrap()
-                .decrypt("rocket_science").unwrap_err(),
-            Error::Pass
+                .decrypt("rocket_science"),
+            Err(Error::Pass)
         );
-        assert_eq!(
-            "a".generate(false).unwrap().decrypt("b").unwrap_err(),
-            Error::Pass
-        );
+        assert_eq!("a".generate(false).unwrap().decrypt("b"), Err(Error::Pass));
     }
 
     #[test]

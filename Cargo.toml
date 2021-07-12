@@ -1,6 +1,6 @@
 [package]
 name = "bip38"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["ceca69ec8e1bcad6c6d79e1dcf7214ff67766580a62b7d19a6fb094c97b4f2dc"]
 edition = "2018"
 include = [
@@ -10,7 +10,7 @@ include = [
 ]
 description = "Encrypt and decrypt bitcoin private keys with bip-0038 standard"
 documentation = "https://docs.rs/bip38"
-homepage = "https://crates.io/crates/bip38"
+homepage = "https://github.com/bitcoin/bips/blob/master/bip-0038.mediawiki"
 repository = "https://github.com/ceca69ec/bip38"
 keywords = ["bip-0038", "bitcoin", "decryption", "encryption"]
 categories = ["cryptography"]
