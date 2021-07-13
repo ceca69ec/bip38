@@ -57,10 +57,13 @@ assert_eq!(
 use bip38::{Decrypt, Generate};
 
 // true => compress
-assert!("passphrase".generate(true).unwrap().decrypt("passphrase").is_ok());
+assert!("passphrase".generate(true).unwrap().starts_with("6Pn"));
 
 // false => uncompress
-assert!("passphrase".generate(false).unwrap().decrypt("passphrase").is_ok());
+assert!("passphrase".generate(false).unwrap().starts_with("6Pf"));
+
+// ぽー
+assert!("バンドメイド".generate(true).unwrap().decrypt("バンドメイド").is_ok());
 ```
 
 # Compress flag
@@ -68,7 +71,7 @@ assert!("passphrase".generate(false).unwrap().decrypt("passphrase").is_ok());
 * `true` always signify: use the public key of this private key `compressed` (33 bytes).
 * `false` always signify: use the public key of this private key `uncompressed` (65 bytes).
 
-Obs: the use of uncompressed public keys is deprecated and discourajed. For new private keys always chosse the `true` flag.
+Obs: the use of uncompressed public keys is deprecated and discouraged. For new private keys always choose the `true` flag.
 
 ## Normalization
 
@@ -77,7 +80,7 @@ This crate handle the normalization (`nfc`) of the passphrase as specified on `b
 use bip38::{Decrypt, Encrypt};
 
 assert_eq!(
-    [0xba; 32].encrypt("バンドメイド", true).unwrap().decrypt("バンドメイド").unwrap(),
+    [0xba; 32].encrypt("ΜΟΛΩΝ ΛΑΒΕ", true).unwrap().decrypt("ΜΟΛΩΝ ΛΑΒΕ").unwrap(),
     ([0xba; 32], true)
 );
 ```
