@@ -66,7 +66,7 @@ assert!("passphrase".generate(false).unwrap().starts_with("6Pf"));
 assert!("バンドメイド".generate(true).unwrap().decrypt("バンドメイド").is_ok());
 ```
 
-# Compress flag
+## Boolean flag
 
 * `true` always signify: use the public key of this private key `compressed` (33 bytes).
 * `false` always signify: use the public key of this private key `uncompressed` (65 bytes).
