@@ -7,11 +7,11 @@ bip38
 
 Encrypt and decrypt bitcoin private keys with [bip-0038](https://github.com/bitcoin/bips/blob/master/bip-0038.mediawiki) standard.
 
-This crate treat bitcoin private as raw 32 bytes (`[u8; 32]`). Hexadecimal, wif or any other representation (excepting the resulting encrypted private keys) are out of scope of this implementation.
+This crate treat bitcoin private keys as raw 32 bytes (`[u8; 32]`). Hexadecimal, wif or any other representation (excepting the resulting encrypted private keys) are out of scope of this implementation.
 
 ## Basic examples
 
-Encryption:
+#### Encryption
 ```rust
 use bip38::{Encrypt, Error};
 
@@ -32,7 +32,7 @@ assert_eq!([0x00; 32].encrypt("strong_pass", true), Err(Error::PrvKey));
 assert_eq!([0x00; 32].encrypt("strong_pass", false), Err(Error::PrvKey));
 ```
 
-Decryption:
+#### Decryption
 ```rust
 use bip38::{Decrypt, Error};
 
@@ -52,7 +52,7 @@ assert_eq!(
 );
 ```
 
-Generation (elliptic curve multiplication method, not deterministic):
+#### Generation (elliptic curve multiplication, not deterministic)
 ```rust
 use bip38::{Decrypt, Generate};
 
@@ -63,10 +63,17 @@ assert!("passphrase".generate(true).unwrap().decrypt("passphrase").is_ok());
 assert!("passphrase".generate(false).unwrap().decrypt("passphrase").is_ok());
 ```
 
+# Compress flag
+
+* `true` always signify: use the public key of this private key `compressed` (33 bytes).
+* `false` always signify: use the public key of this private key `uncompressed` (65 bytes).
+
+Obs: the use of uncompressed public keys is deprecated and discourajed. For new private keys always chosse the `true` flag.
+
 ## Normalization
 
 This crate handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
-```
+```rust
 use bip38::{Decrypt, Encrypt};
 
 assert_eq!(
@@ -77,7 +84,7 @@ assert_eq!(
 
 ## Testing
 
-Please always run `cargo test --release`. The encryption algorithm is, by design, heavy on cpu. Without the optimizations of a release build running tests can consume long time.
+Please always run `cargo test` with `--release` flag. Without the optimizations of a release build running tests can consume long time (the encryption algorithm is, by design, heavy on cpu).
 
 ## Usage
 
@@ -88,4 +95,4 @@ You can use this crate in your project by adding the following to your `Cargo.to
 bip38 = "1.0.0"
 ```
 
-For more details and examples please see the [documentation](https://docs.rs/bip38)
+For more details and examples please go to the [documentation](https://docs.rs/bip38)

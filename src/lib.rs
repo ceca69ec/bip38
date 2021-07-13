@@ -7,7 +7,7 @@
 //!
 //! # Basic examples
 //!
-//! Encryption:
+//! #### Encryption
 //! ```
 //! use bip38::{Encrypt, Error};
 //!
@@ -28,7 +28,7 @@
 //! assert_eq!([0x00; 32].encrypt("strong_pass", false), Err(Error::PrvKey));
 //! ```
 //!
-//! Decryption:
+//! #### Decryption
 //! ```
 //! use bip38::{Decrypt, Error};
 //!
@@ -48,7 +48,7 @@
 //! );
 //! ```
 //!
-//! Generation (elliptic curve multiplication method, not deterministic):
+//! #### Generation (elliptic curve multiplication, not deterministic)
 //! ```
 //! use bip38::{Decrypt, Generate};
 //!
@@ -58,6 +58,14 @@
 //! // false => uncompress
 //! assert!("passphrase".generate(false).unwrap().decrypt("passphrase").is_ok());
 //! ```
+//!
+//! # Boolean flag
+//!
+//! * `true` always signify: use the public key of this private key `compressed` (33 bytes).
+//! * `false` always signify: use the public key of this private key `uncompressed` (65 bytes).
+//!
+//! Obs: the use of uncompressed public keys is deprecated and discourajed. For new private keys
+//! always chosse the `true` flag.
 //!
 //! # Normalization
 //!
@@ -73,8 +81,9 @@
 //!
 //! # Testing
 //!
-//! Please always run `cargo test --release`. The encryption algorithm is, by design, heavy on cpu.
-//! Without the optimizations of a release build running tests can consume long time.
+//! Please always run `cargo test` with `--release` flag. Without the optimizations of a release
+//! build running tests can consume long time (the encryption algorithm is, by design, heavy on
+//! cpu).
 //!
 //! # Usage
 //!
@@ -85,7 +94,7 @@
 //! bip38 = "1.0.0"
 //! ```
 //!
-//! Decrypting:
+//! #### Decrypting
 //! ```
 //! use bip38::Decrypt;
 //!
@@ -98,34 +107,30 @@
 //! });
 //! ```
 //!
-//! Encrypting:
+//! #### Encrypting
 //! ```
 //! use bip38::Encrypt;
 //!
-//! let internal_prv_key = [0x42; 32];
+//! let internal_prv_key = [0xd0; 32];
 //! let user_pass = "not_good_pass";
 //!
 //! let encrypted_prv_key = internal_prv_key.encrypt(user_pass, true).unwrap_or_else(|err| {
-//!     eprintln!("{}", err); // if the private key could not become a valid bitcoin address
+//!     eprintln!("{}", err); // if the private key could not generate a valid bitcoin address
 //!     std::process::exit(1);
 //! });
-//! // true to indicate the compression of the public key of this private key (33 bytes)
 //! ```
 //!
-//! Generating:
+//! #### Generating (elliptc curve multiplication)
 //! ```
 //! use bip38::Generate;
 //!
 //! let user_pass = "a_good_pass_please";
 //!
 //! let encrypted_prv_key = user_pass.generate(false).unwrap_or_else(|err| {
-//!     eprintln!("{}", err); // if the generated private key could not become an address (rare)
+//!     eprintln!("{}", err); // if the private key could not generate an address (rare)
 //!     std::process::exit(1);
 //! });
-//! // false to indicate the use of the public key of this private key uncompressed (65 bytes)
 //! ```
-
-// TODO: doc on main page
 
 use aes::Aes256;
 use aes::cipher::{
@@ -217,21 +222,18 @@ pub trait Decrypt {
     ///
     /// # Examples
     ///
-    /// Basic usage:
     ///
     /// ```
     /// use bip38::Decrypt;
     ///
     /// // decryption of non elliptic curve multiplication
     /// assert_eq!(
-    ///     "6PYMgbeR6XCsX4yJx8E52vW4PJDoTiu1QeFLn81KoW6Shye5DZ4ZnDauno".decrypt("weakPass")
-    ///         .unwrap(),
-    ///     ([0x11; 32], true) // indication to compress the public key of this private key
+    ///     "6PYMgbeR6XCsX4yJx8E52vW4PJDoTiu1QeFLn81KoW6Shye5DZ4ZnDauno".decrypt("weakPass"),
+    ///     Ok(([0x11; 32], true)) // indication to compress the public key of this private key
     /// );
     /// assert_eq!(
-    ///     "6PRVo8whL3QbdrXpKk3gP2dGuxDbuvMsMqUq2imVigrm8oyRbvBoRUsbB3".decrypt("weakPass")
-    ///         .unwrap(),
-    ///     ([0x11; 32], false) // indication do not compress the public key
+    ///     "6PRVo8whL3QbdrXpKk3gP2dGuxDbuvMsMqUq2imVigrm8oyRbvBoRUsbB3".decrypt("weakPass"),
+    ///     Ok(([0x11; 32], false)) // indication do not compress the public key
     /// );
     ///
     /// // decryption of elliptic curve multiplication
@@ -245,14 +247,14 @@ pub trait Decrypt {
     ///
     /// # Errors
     ///
-    /// `Error::Pass` is returned if an invalid passphrase is inserted.
+    /// * `Error::Pass` is returned if an invalid passphrase is inserted.
     ///
-    /// `Error::EncKey` is returned if the target `str` is not an valid encrypted private key.
+    /// * `Error::EncKey` is returned if the target `str` is not an valid encrypted private key.
     ///
-    /// `Error::Checksum` is returned if the target `str` has valid encrypted private key format
+    /// * `Error::Checksum` is returned if the target `str` has valid encrypted private key format
     /// but invalid checksum.
     ///
-    /// `Error::Base58` is returned if an non `base58` character is found.
+    /// * `Error::Base58` is returned if an non `base58` character is found.
     ///
     /// ```
     /// use bip38::{Decrypt, Error};
@@ -303,7 +305,6 @@ pub trait Encrypt {
     ///
     /// # Examples
     ///
-    /// Basic usage:
     /// ```
     /// use bip38::Encrypt;
     ///
@@ -339,9 +340,9 @@ pub trait Encrypt {
     ///
     /// assert_eq!(
     ///     [
-    ///         0x64, 0xee, 0xab, 0x5f, 0x9b, 0xe2, 0xa0, 0x1a, 0x83, 0x65, 0xa5, 0x79,
-    ///         0x51, 0x1e, 0xb3, 0x37, 0x3c, 0x87, 0xc4, 0x0d, 0xa6, 0xd2, 0xa2, 0x5f,
-    ///         0x05, 0xbd, 0xa6, 0x8f, 0xe0, 0x77, 0xb6, 0x6e
+    ///         0x64, 0xee, 0xab, 0x5f, 0x9b, 0xe2, 0xa0, 0x1a, 0x83, 0x65, 0xa5, 0x79, 0x51, 0x1e,
+    ///         0xb3, 0x37, 0x3c, 0x87, 0xc4, 0x0d, 0xa6, 0xd2, 0xa2, 0x5f, 0x05, 0xbd, 0xa6, 0x8f,
+    ///         0xe0, 0x77, 0xb6, 0x6e
     ///     ].encrypt("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}", false).unwrap(),
     ///     "6PRW5o9FLp4gJDDVqJQKJFTpMvdsSGJxMYHtHaQBF3ooa8mwD69bapcDQn"
     /// );
@@ -365,12 +366,11 @@ pub trait Generate {
     ///
     /// # Examples
     ///
-    /// Basic usage:
     /// ```
     /// use bip38::{Decrypt, Generate};
     ///
     /// assert!("バンドメイド".generate(true).unwrap().decrypt("バンドメイド").is_ok());
-    /// assert!("kurupo!".generate(false).unwrap().decrypt("kurupo!").is_ok());
+    /// assert!("くるっぽー！".generate(false).unwrap().decrypt("くるっぽー！").is_ok());
     /// ```
     ///
     /// # Errors
@@ -844,10 +844,7 @@ mod tests {
         for (idx, ekey) in TV_ENCRYPTED.iter().enumerate() {
             if idx > 2 { compress = true }
             if idx > 4 { compress = false }
-            assert_eq!(
-                ekey.decrypt(TV_PASS[idx]).unwrap(),
-                (TV_KEY[idx], compress)
-            );
+            assert_eq!(ekey.decrypt(TV_PASS[idx]), Ok((TV_KEY[idx], compress)));
         }
         assert!(TV_ENCRYPTED[1].decrypt("Satoshi").is_ok());
         assert_eq!(
@@ -888,7 +885,8 @@ mod tests {
                 .decrypt("バンドメイド").is_ok()
         );
         assert!(
-            "kurupo!".generate(false).unwrap().decrypt("kurupo!").is_ok()
+            "くるっぽー！".generate(false).unwrap()
+                .decrypt("くるっぽー！").is_ok()
         );
         assert_eq!(
             "something_really_dumb".generate(true).unwrap()
