@@ -98,4 +98,4 @@ You can use this crate in your project by adding the following to your `Cargo.to
 bip38 = "1.0.2"
 ```
 
-For more details and examples please go to the [documentation](https://docs.rs/bip38)
+For more details and examples please go to the [documentation](https://docs.rs/bip38).
