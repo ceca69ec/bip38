@@ -90,7 +90,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! bip38 = "1.0.0"
+//! bip38 = "1.0.2"
 //! ```
 //!
 //! #### Decrypting

@@ -1,6 +1,6 @@
 [package]
 name = "bip38"
-version = "1.0.1"
+version = "1.0.2"
 authors = ["ceca69ec8e1bcad6c6d79e1dcf7214ff67766580a62b7d19a6fb094c97b4f2dc"]
 edition = "2018"
 include = [
