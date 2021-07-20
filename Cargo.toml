@@ -8,7 +8,7 @@ include = [
 	"Cargo.toml",
 	"README.md"
 ]
-description = "Encrypt and decrypt bitcoin private keys with bip-0038 standard"
+description = "Encrypt and decrypt bitcoin private keys with bip-0038 standard."
 documentation = "https://docs.rs/bip38"
 homepage = "https://github.com/bitcoin/bips/blob/master/bip-0038.mediawiki"
 repository = "https://github.com/ceca69ec/bip38"
