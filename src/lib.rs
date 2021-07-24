@@ -131,6 +131,8 @@
 //! });
 //! ```
 
+// TODO: encrypt wif, tests, documentation and version
+
 use aes::Aes256;
 use aes::cipher::{
     BlockDecrypt,
@@ -151,8 +153,20 @@ const NBBY_PUBC: usize = 33;
 /// Number of bytes of a public key uncompressed.
 const NBBY_PUBU: usize = 65;
 
+/// Number of bytes (payload only) contained in a decoded wif compressed key.
+const NBBY_WIFC: usize = 34;
+
+/// Number of bytes (payload only) contained in a decoded wif uncompressed key.
+const NBBY_WIFU: usize = 33;
+
 /// Number of base58 characters on every encrypted private key.
 const NBCH_EKEY: usize = 58;
+
+/// Number of base58 characters in a wif compressed secret key.
+const NBCH_WIFC: usize = 52;
+
+/// Number of base58 characters in a wif uncompressed secret key.
+const NBCH_WIFU: usize = 51;
 
 /// Prefix of all ec encrypted keys.
 const PRE_EC: [u8; 2] = [0x01, 0x43];
@@ -163,11 +177,20 @@ const PRE_EKEY: &str = "6P";
 /// Prefix of all non ec encrypted keys.
 const PRE_NON_EC: [u8; 2] = [0x01, 0x42];
 
+/// First two possible characters of a wif compressed secret key.
+const PRE_WIFC: &str = "KL";
+
+/// First byte of all wif encoded secret keys.
+const PRE_WIFB: u8 = 0x80;
+
+/// First character of a wif uncompressed secret key.
+const PRE_WIFU: &str = "5";
+
 /// Error variants of `bip38` crate.
 ///
 /// The only errors that are intended to be handle are:
 ///
-/// `Base58`, `Checksum`, `EncKey`, `Pass`, `PrvKey`.
+/// `Base58`, `Checksum`, `EncKey`, `Pass`, `PrvKey`, WifKey.
 ///
 /// All others exist for safety in case of something unexpected happens with dependencies.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd)]
@@ -192,6 +215,8 @@ pub enum Error {
     ScryptFn,
     /// Trowed if an invalid `scrypt` parameter is used.
     ScryptParam,
+    /// Invalid private key represented in wif format.
+    WifKey,
 }
 
 /// Internal Functions to manipulate an arbitrary number of bytes [u8].
@@ -291,6 +316,9 @@ pub trait Decrypt {
     /// );
     /// ```
     fn decrypt(&self, pass: &str) -> Result<([u8; 32], bool), Error>;
+
+    /// TODO: documentation
+    fn decrypt_to_wif(&self, pass: &str) -> Result<String, Error>;
 }
 
 /// Allow encryption of bitcoin private keys in `[u8; 32]` format.
@@ -403,12 +431,18 @@ pub trait Generate {
 trait PrivateKeyManipulation {
     /// Generate secp256k1 point based on target secret key.
     fn public(&self, compress: bool) -> Result<Vec<u8>, Error>;
+
+    /// Generate a representation of a secret key in wif format.
+    fn wif(&self, compress: bool) -> String;
 }
 
 /// Internal Functions to manipulate strings.
 trait StringManipulation {
     /// Decode informed base 58 string into bytes (payload only).
     fn decode_base58ck(&self) -> Result<Vec<u8>, Error>;
+
+    /// Decode a secret key encoded in base58 returning bytes and compression.
+    fn decode_wif(&self) -> Result<([u8; 32], bool), Error>;
 
     /// Decrypt encrypted private key with ec multiply mode.
     fn decrypt_ec(&self, pass: &str) -> Result<([u8; 32], bool), Error>;
@@ -417,8 +451,8 @@ trait StringManipulation {
     fn decrypt_non_ec(&self, pass: &str) -> Result<([u8; 32], bool), Error>;
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Error::Base58 => write!(f, "invalid base58 string"),
             Error::Checksum => write!(f, "invalid checksum"),
@@ -430,6 +464,7 @@ impl std::fmt::Display for Error {
             Error::PubKey => write!(f, "invalid public key"),
             Error::ScryptFn => write!(f, "failure on scrypt function"),
             Error::ScryptParam => write!(f, "invalid scrypt parameter"),
+            Error::WifKey => write!(f, "invalid wif private key")
         }
     }
 }
@@ -479,6 +514,13 @@ impl Decrypt for str {
                 return Err(Error::EncKey);
             }
         )
+    }
+
+    #[inline]
+    fn decrypt_to_wif(&self, pass: &str) -> Result<String, Error> {
+        let raw = self.decrypt(pass)?;
+        let wif = raw.0.wif(raw.1);
+        Ok(wif)
     }
 }
 
@@ -622,6 +664,14 @@ impl PrivateKeyManipulation for [u8; 32] {
             Ok(secp_pub.serialize_uncompressed().to_vec())
         }
     }
+
+    #[inline]
+    fn wif(&self, compress: bool) -> String {
+        let mut decoded: Vec<u8> = vec![PRE_WIFB];
+        decoded.append(&mut self.to_vec());
+        if compress { decoded.push(0x01); }
+        decoded.encode_base58ck()
+    }
 }
 
 impl StringManipulation for str {
@@ -633,6 +683,22 @@ impl StringManipulation for str {
         } else {
             Err(Error::Checksum)
         }
+    }
+
+    #[inline]
+    fn decode_wif(&self) -> Result<([u8; 32], bool), Error> {
+        if (!self.is_char_boundary(1) || !PRE_WIFC.contains(&self[..1]) ||
+            self.len() != NBCH_WIFC) && (!self.starts_with(PRE_WIFU) || self.len() != NBCH_WIFU) {
+            return Err(Error::WifKey);
+        }
+        let raw_bytes = self.decode_base58ck()?;
+        if (raw_bytes.len() != NBBY_WIFC && raw_bytes.len() != NBBY_WIFU) ||
+            raw_bytes[0] != PRE_WIFB {
+            return Err(Error::WifKey)
+        }
+        let mut result = [0x00; 32];
+        result[..].copy_from_slice(&raw_bytes[1..33]);
+        Ok((result, raw_bytes.len() == NBBY_WIFC))
     }
 
     #[inline]
@@ -768,7 +834,7 @@ impl StringManipulation for str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// Encrypted secret keys obtained on test vectors of bip-0038.
+    /// Encrypted secret keys from bip-0038 test vectors.
     const TV_ENCRYPTED: [&str; 9] = [
         "6PRVWUbkzzsbcVac2qwfssoUJAN1Xhrg6bNk8J7Nzm5H7kxEbn2Nh2ZoGg",
         "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq",
@@ -781,7 +847,7 @@ mod tests {
         "6PgGWtx25kUg8QWvwuJAgorN6k9FbE25rv5dMRwu5SKMnfpfVe5mar2ngH"
     ];
 
-    /// Resulting keys obtained in test vectors of bip-0038.
+    /// Resulting keys from bip-0038 test vectors.
     const TV_KEY: [[u8; 32]; 9] = [
         [
             0xcb, 0xf4, 0xb9, 0xf7, 0x04, 0x70, 0x85, 0x6b, 0xb4, 0xf4, 0x0f, 0x80, 0xb8, 0x7e,
@@ -830,7 +896,7 @@ mod tests {
         ]
     ];
 
-    /// Passphrases obtained on test vectors of bip-0038.
+    /// Passphrases from bip-0038 test vectors.
     const TV_PASS: [&str; 9] = [
         "TestingOneTwoThree",
         "Satoshi",
@@ -842,6 +908,49 @@ mod tests {
         "MOLON LABE",
         "ΜΟΛΩΝ ΛΑΒΕ"
     ];
+
+    /// Wif private keys from bip-0038 test vectors.
+    const TV_WIF: [&str; 9] = [
+        "5KN7MzqK5wt2TP1fQCYyHBtDrXdJuXbUzm4A9rKAteGu3Qi5CVR",
+        "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi5",
+        "5Jajm8eQ22H3pGWLEVCXyvND8dQZhiQhoLJNKjYXk9roUFTMSZ4",
+        "L44B5gGEpqEDRS9vVPz7QT35jcBG2r3CZwSwQ4fCewXAhAhqGVpP",
+        "KwYgW8gcxj1JWJXhPSu4Fqwzfhp5Yfi42mdYmMa4XqK7NJxXUSK7",
+        "5K4caxezwjGCGfnoPTZ8tMcJBLB7Jvyjv4xxeacadhq8nLisLR2",
+        "5KJ51SgxWaAYR13zd9ReMhJpwrcX47xTJh2D3fGPG9CM8vkv5sH",
+        "5JLdxTtcTHcfYcmJsNVy1v2PMDx432JPoYcBTVVRHpPaxUrdtf8",
+        "5KMKKuUmAkiNbA3DazMQiLfDq47qs8MAEThm4yL8R2PhV1ov33D"
+    ];
+
+    #[test]
+    fn test_decode_wif() {
+        assert_eq!(
+            "KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp".decode_wif(),
+            Ok(([0x11; 32], true))
+        );
+        assert_eq!(
+            "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh".decode_wif(),
+            Ok(([0x11; 32], false))
+        );
+        assert_eq!(
+            "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9".decode_wif(),
+            Ok(([0x69; 32], true))
+        );
+        assert_eq!(
+            "5JciBbkdYdjKKE9rwZ7c1XscwwcLBbv9aJyeZeWQi2gZnHeiX57".decode_wif(), 
+            Ok(([0x69; 32], false))
+        );
+        assert_eq!(
+            ["KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9", "a"].concat().decode_wif(),
+            Err(Error::WifKey)
+        );
+        assert_eq!(
+            "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9".replace("d", "b").decode_wif(),
+            Err(Error::Checksum)
+        );
+        assert_eq!(["a"; 51].concat().decode_wif(), Err(Error::WifKey));
+        assert_eq!(["a"; 52].concat().decode_wif(), Err(Error::WifKey));
+    }
 
     #[test]
     fn test_decrypt() {
@@ -855,6 +964,19 @@ mod tests {
         assert_eq!(TV_ENCRYPTED[1].decrypt("wrong"), Err(Error::Pass));
         assert_eq!(TV_ENCRYPTED[1].replace("X", "x").decrypt("Satoshi"), Err(Error::Checksum));
         assert_eq!(TV_ENCRYPTED[1][1..].decrypt("Satoshi"), Err(Error::EncKey));
+    }
+
+    #[test]
+    fn test_decrypt_to_wif() {
+        for (idx, ekey) in TV_ENCRYPTED.iter().enumerate() {
+            assert_eq!(ekey.decrypt_to_wif(TV_PASS[idx]), Ok(String::from(TV_WIF[idx])));
+        }
+        assert!(TV_ENCRYPTED[1].decrypt_to_wif("Satoshi").is_ok());
+        assert_eq!(TV_ENCRYPTED[1].decrypt_to_wif("wrong"), Err(Error::Pass));
+        assert_eq!(
+            TV_ENCRYPTED[1].replace("X", "x").decrypt_to_wif("Satoshi"), Err(Error::Checksum)
+        );
+        assert_eq!(TV_ENCRYPTED[1][1..].decrypt_to_wif("Satoshi"), Err(Error::EncKey));
     }
 
     #[test]
@@ -984,5 +1106,13 @@ mod tests {
                 0x90, 0xf5, 0x81, 0xb5, 0x91, 0xd5, 0x63, 0x79, 0xca
             ]
         );
+    }
+
+    #[test]
+    fn test_wif() {
+        assert_eq!([0x11; 32].wif(true), "KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp");
+        assert_eq!([0x11; 32].wif(false), "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh");
+        assert_eq!([0x69; 32].wif(true), "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9");
+        assert_eq!([0x69; 32].wif(false), "5JciBbkdYdjKKE9rwZ7c1XscwwcLBbv9aJyeZeWQi2gZnHeiX57");
     }
 }
