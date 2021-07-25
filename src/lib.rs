@@ -131,7 +131,7 @@
 //! });
 //! ```
 
-// TODO: encrypt wif, tests, documentation and version
+// TODO: documentation, formatting and version
 
 use aes::Aes256;
 use aes::cipher::{
@@ -147,6 +147,15 @@ use secp256k1::{Secp256k1, SecretKey, PublicKey};
 use sha2::Digest;
 use unicode_normalization::UnicodeNormalization;
 
+/// Number of base58 characters on every encrypted private key.
+const LEN_EKEY: usize = 58;
+
+/// Number of base58 characters in a wif compressed secret key.
+const LEN_WIFC: usize = 52;
+
+/// Number of base58 characters in a wif uncompressed secret key.
+const LEN_WIFU: usize = 51;
+
 /// Number of bytes of a public key compressed.
 const NBBY_PUBC: usize = 33;
 
@@ -158,15 +167,6 @@ const NBBY_WIFC: usize = 34;
 
 /// Number of bytes (payload only) contained in a decoded wif uncompressed key.
 const NBBY_WIFU: usize = 33;
-
-/// Number of base58 characters on every encrypted private key.
-const NBCH_EKEY: usize = 58;
-
-/// Number of base58 characters in a wif compressed secret key.
-const NBCH_WIFC: usize = 52;
-
-/// Number of base58 characters in a wif uncompressed secret key.
-const NBCH_WIFU: usize = 51;
 
 /// Prefix of all ec encrypted keys.
 const PRE_EC: [u8; 2] = [0x01, 0x43];
@@ -241,8 +241,8 @@ pub trait Decrypt {
     /// This function targets strings of 58 base58 characters with the version prefix `6P` and
     /// returns a tuple containing the decrypted private key (`[u8; 32]`) and a boolean indication
     /// of if this private key is intended to result in a compressed public key or not. So, if the
-    /// flag is `true`, create an compressed public key (33 bytes), in case of `false`, use the full
-    /// 65 bytes of the public key.
+    /// flag is `true`, create an compressed public key (33 bytes), in case of `false`, use the
+    /// full 65 bytes of the public key.
     ///
     /// # Examples
     ///
@@ -326,8 +326,8 @@ pub trait Encrypt {
     /// Encrypt a bitcoin private key in the format of `[u8; 32]` (without elliptic curve
     /// multiplication) into a `String` of 58 base58 characters.
     ///
-    /// When decrypting the boolean flag `compress` is just an indication, but here it influences on
-    /// the resulting prefix of the encrypted private key and obviously on the indication when
+    /// When decrypting the boolean flag `compress` is just an indication, but here it influences
+    /// on the resulting prefix of the encrypted private key and obviously on the indication when
     /// decrypting, but not in the private key itself.
     ///
     /// # Examples
@@ -361,7 +361,8 @@ pub trait Encrypt {
     ///
     /// # Passphrase
     ///
-    /// This function handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
+    /// This function handle the normalization (`nfc`) of the passphrase as specified on
+    /// `bip-0038`.
     /// ```
     /// use bip38::Encrypt;
     ///
@@ -377,18 +378,24 @@ pub trait Encrypt {
     fn encrypt(&self, pass: &str, compress: bool) -> Result<String, Error>;
 }
 
+/// Allow encryption of bitcoin private keys in the `wif` format.
+pub trait EncryptWif {
+    /// TODO: documentation
+    fn encrypt_wif(&self, pass: &str) -> Result<String, Error>;
+}
+
 /// Allow generation of encrypted private keys using elliptic curve multiplication.
 pub trait Generate {
     /// Create an encrypted private key in the form of a `String` of 58 base58 characters based on
     /// a passphrase (using elliptic curve multiplication and pseudo-random number generation).
     ///
     /// This function don't receives a private key, it's generated internally as specified in
-    /// `bip-0038`. The target string is the passphrase to be used to decrypt. The resulting private
-    /// key is only know if the encrypted private key is decrypted. So the result is, by design, not
-    /// deterministic.
+    /// `bip-0038`. The target string is the passphrase to be used to decrypt. The resulting
+    /// private key is only know if the encrypted private key is decrypted. So the result is, by
+    /// design, not deterministic.
     ///
-    /// When decrypting the boolean flag `compress` is just an indication, but here it influences on
-    /// the resulting prefix of the encrypted private key and obviously on the indication when
+    /// When decrypting the boolean flag `compress` is just an indication, but here it influences
+    /// on the resulting prefix of the encrypted private key and obviously on the indication when
     /// decrypting, but not in the private key itself.
     ///
     /// # Examples
@@ -409,13 +416,15 @@ pub trait Generate {
     /// # Errors
     ///
     /// The only case this function can fail by itself is if the generated private key could not
-    /// result in a bitcoin address. In this case the function results in `Error::PrvKey`. All other
-    /// errors are here for safety and are related to dependencies. This function don't `unwrap`
-    /// internally to let the decision to do or not to the developer using the crate.
+    /// result in a bitcoin address. In this case the function results in `Error::PrvKey`. All
+    /// other errors are here for safety and are related to dependencies. This function don't 
+    /// `unwrap` internally to let the decision to do or not to the developer using the crate.
     ///
     /// # Passphrase
     ///
-    /// This function handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
+    /// This function handle the normalization (`nfc`) of the passphrase as specified on
+    /// `bip-0038`.
+    ///
     /// ```
     /// use bip38::{Decrypt, Generate};
     ///
@@ -504,7 +513,7 @@ impl Decrypt for str {
     #[inline]
     fn decrypt(&self, pass: &str) -> Result<([u8; 32], bool), Error> {
         Ok(
-            if self.len() != NBCH_EKEY || (self.is_char_boundary(2) && &self[..2] != PRE_EKEY) {
+            if self.len() != LEN_EKEY || (self.is_char_boundary(2) && &self[..2] != PRE_EKEY) {
                 return Err(Error::EncKey);
             } else if self.decode_base58ck()?[..2] == PRE_NON_EC {
                 self.decrypt_non_ec(pass)?
@@ -521,6 +530,15 @@ impl Decrypt for str {
         let raw = self.decrypt(pass)?;
         let wif = raw.0.wif(raw.1);
         Ok(wif)
+    }
+}
+
+impl EncryptWif for str {
+    #[inline]
+    fn encrypt_wif(&self, pass: &str) -> Result<String, Error> {
+        let raw_prvk = self.decode_wif()?;
+        let eprvk = raw_prvk.0.encrypt(pass, raw_prvk.1)?;
+        Ok(eprvk)
     }
 }
 
@@ -688,7 +706,7 @@ impl StringManipulation for str {
     #[inline]
     fn decode_wif(&self) -> Result<([u8; 32], bool), Error> {
         if (!self.is_char_boundary(1) || !PRE_WIFC.contains(&self[..1]) ||
-            self.len() != NBCH_WIFC) && (!self.starts_with(PRE_WIFU) || self.len() != NBCH_WIFU) {
+            self.len() != LEN_WIFC) && (!self.starts_with(PRE_WIFU) || self.len() != LEN_WIFU) {
             return Err(Error::WifKey);
         }
         let raw_bytes = self.decode_base58ck()?;
@@ -937,7 +955,7 @@ mod tests {
             Ok(([0x69; 32], true))
         );
         assert_eq!(
-            "5JciBbkdYdjKKE9rwZ7c1XscwwcLBbv9aJyeZeWQi2gZnHeiX57".decode_wif(), 
+            "5JciBbkdYdjKKE9rwZ7c1XscwwcLBbv9aJyeZeWQi2gZnHeiX57".decode_wif(),
             Ok(([0x69; 32], false))
         );
         assert_eq!(
@@ -991,6 +1009,13 @@ mod tests {
         for (idx, key) in TV_KEY[..5].iter().enumerate() { // the last four are ec-multiply
             if idx > 2 { compress = true }
             assert_eq!(key.encrypt(TV_PASS[idx], compress).unwrap(), TV_ENCRYPTED[idx]);
+        }
+    }
+
+    #[test]
+    fn test_encrypt_wif() {
+        for (idx, wif) in TV_WIF[..5].iter().enumerate() {
+            assert_eq!(wif.encrypt_wif(TV_PASS[idx]).unwrap(), TV_ENCRYPTED[idx]);
         }
     }
 
