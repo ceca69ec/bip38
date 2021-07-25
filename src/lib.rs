@@ -53,6 +53,7 @@
 //!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2".decrypt("wrong_pass"),
 //!     Err(Error::Pass)
 //! );
+//!
 //! // wif
 //! assert_eq!(
 //!     "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2".decrypt_to_wif("strong_pass"),
@@ -90,6 +91,7 @@
 //! # Normalization
 //!
 //! This crate handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
+//!
 //! ```
 //! use bip38::{Decrypt, Encrypt};
 //!
@@ -111,7 +113,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! bip38 = "1.0.2"
+//! bip38 = "1.1.0"
 //! ```
 //!
 //! #### Decrypting
@@ -126,23 +128,33 @@
 //!     eprintln!("{}", err); // in case of invalid passphrase or invalid encrypted private key
 //!     std::process::exit(1);
 //! });
+//! let wif = user_ekey.decrypt_to_wif(&user_pass).unwrap_or_else(|err| {
+//!     eprintln!("{}", err);
+//!     std::process::exit(2);
+//! });
 //! ```
 //!
 //! #### Encrypting
 //!
 //! ```
-//! use bip38::Encrypt;
+//! use bip38::{Encrypt, EncryptWif};
 //!
+//! let informed_wif_key = "L4DczGWRanBGXnun83Fs9HcPCaXXq7ngxZrBY13Phdsw36WU1rQA";
 //! let internal_prv_key = [0xd0; 32];
 //! let user_pass = String::from("not_good_pass");
 //!
-//! let encrypted_prv_key = internal_prv_key.encrypt(&user_pass, true).unwrap_or_else(|err| {
+//! let eprvk_from_raw = internal_prv_key.encrypt(&user_pass, true).unwrap_or_else(|err| {
 //!     eprintln!("{}", err); // if the private key could not generate a valid bitcoin address
 //!     std::process::exit(1);
 //! });
+//! let eprvk_from_wif = informed_wif_key.encrypt_wif(&user_pass).unwrap_or_else(|err| {
+//!     eprintln!("{}", err); // in case of invalid wif/decoded private key
+//!     std::process::exit(2);
+//! });
+//! assert_eq!(eprvk_from_raw, eprvk_from_wif);
 //! ```
 //!
-//! #### Generating (elliptc curve multiplication)
+//! #### Generating (elliptic curve multiplication)
 //!
 //! ```
 //! use bip38::Generate;
@@ -514,6 +526,17 @@ pub trait EncryptWif {
     /// This function can fail due to decoding process of the target `wif` private key and if the
     /// decoded private key can't result in a bitcoin address.
     ///
+    /// * `Error::Base58` is returned if an non `base58` character is found.
+    ///
+    /// * `Error::Checksum` is returned if the target `str` has valid `wif` format but invalid
+    /// checksum.
+    ///
+    /// * `Error::PrvKey` is returned if the decoded private key could not generate a bitcoin
+    /// address
+    ///
+    /// * `Error::WifKey` is returned if the target `str` is not an valid `wif` private key.
+    ///
+    ///
     /// ```
     /// use bip38::{EncryptWif, Error};
     ///
@@ -522,16 +545,16 @@ pub trait EncryptWif {
     ///     Ok(String::from("6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq"))
     /// );
     /// assert_eq!(
-    ///     "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi55".encrypt_wif("Satoshi"), // 55
-    ///     Err(Error::WifKey)
-    /// );
-    /// assert_eq!(
     ///     "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi!".encrypt_wif("Satoshi"), // !
     ///     Err(Error::Base58)
     /// );
     /// assert_eq!(
     ///     "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi6".encrypt_wif("Satoshi"), // 6
     ///     Err(Error::Checksum)
+    /// );
+    /// assert_eq!(
+    ///     "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi55".encrypt_wif("Satoshi"), // 55
+    ///     Err(Error::WifKey)
     /// );
     /// assert_eq!( // the payload of this wif is [0x00; 32]
     ///     "KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73NUBByJr".encrypt_wif("Satoshi"),
@@ -1318,5 +1341,6 @@ mod tests {
         assert_eq!([0x11; 32].wif(false), "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh");
         assert_eq!([0x69; 32].wif(true), "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9");
         assert_eq!([0x69; 32].wif(false), "5JciBbkdYdjKKE9rwZ7c1XscwwcLBbv9aJyeZeWQi2gZnHeiX57");
+        assert_eq!([0xd0; 32].wif(true), "L4DczGWRanBGXnun83Fs9HcPCaXXq7ngxZrBY13Phdsw36WU1rQA");
     }
 }
