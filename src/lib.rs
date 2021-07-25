@@ -1,15 +1,15 @@
 //! Encrypt and decrypt bitcoin private keys with
 //! [bip-0038](https://github.com/bitcoin/bips/blob/master/bip-0038.mediawiki) standard.
 //!
-//! This crate treat bitcoin private keys as raw 32 bytes (`[u8; 32]`). Hexadecimal, wif or any
-//! other representation (excepting the resulting encrypted private keys) are out of scope of this
-//! implementation.
+//! This crate can handle bitcoin private keys as raw 32 bytes (`[u8; 32]`) and encoded in the
+//! `wif` format.
 //!
 //! # Basic examples
 //!
 //! #### Encryption
+//!
 //! ```
-//! use bip38::{Encrypt, Error};
+//! use bip38::{Encrypt, EncryptWif, Error};
 //!
 //! // true => compress
 //! assert_eq!(
@@ -24,9 +24,20 @@
 //! // [0x00; 32] is an invalid private key and cannot generate a valid bitcoin address
 //! assert_eq!([0x00; 32].encrypt("strong_pass", true), Err(Error::PrvKey));
 //! assert_eq!([0x00; 32].encrypt("strong_pass", false), Err(Error::PrvKey));
+//!
+//! // wif
+//! assert_eq!(
+//!     "KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp".encrypt_wif("strong_pass").unwrap(),
+//!     "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2"
+//! );
+//! assert_eq!(
+//!     "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh".encrypt_wif("strong_pass").unwrap(),
+//!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2"
+//! );
 //! ```
 //!
 //! #### Decryption
+//!
 //! ```
 //! use bip38::{Decrypt, Error};
 //!
@@ -42,9 +53,19 @@
 //!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2".decrypt("wrong_pass"),
 //!     Err(Error::Pass)
 //! );
+//! // wif
+//! assert_eq!(
+//!     "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2".decrypt_to_wif("strong_pass"),
+//!     Ok(String::from("KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp"))
+//! );
+//! assert_eq!(
+//!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2".decrypt_to_wif("strong_pass"),
+//!     Ok(String::from("5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh"))
+//! );
 //! ```
 //!
 //! #### Generation (elliptic curve multiplication, not deterministic)
+//!
 //! ```
 //! use bip38::{Decrypt, Generate};
 //!
@@ -94,6 +115,7 @@
 //! ```
 //!
 //! #### Decrypting
+//!
 //! ```
 //! use bip38::Decrypt;
 //!
@@ -107,6 +129,7 @@
 //! ```
 //!
 //! #### Encrypting
+//!
 //! ```
 //! use bip38::Encrypt;
 //!
@@ -120,6 +143,7 @@
 //! ```
 //!
 //! #### Generating (elliptc curve multiplication)
+//!
 //! ```
 //! use bip38::Generate;
 //!
@@ -131,7 +155,7 @@
 //! });
 //! ```
 
-// TODO: documentation, formatting and version
+// TODO: main documentation, formatting and version
 
 use aes::Aes256;
 use aes::cipher::{
@@ -190,7 +214,7 @@ const PRE_WIFU: &str = "5";
 ///
 /// The only errors that are intended to be handle are:
 ///
-/// `Base58`, `Checksum`, `EncKey`, `Pass`, `PrvKey`, WifKey.
+/// `Base58`, `Checksum`, `EncKey`, `Pass`, `PrvKey`, `WifKey`.
 ///
 /// All others exist for safety in case of something unexpected happens with dependencies.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, PartialOrd)]
@@ -215,7 +239,7 @@ pub enum Error {
     ScryptFn,
     /// Trowed if an invalid `scrypt` parameter is used.
     ScryptParam,
-    /// Invalid private key represented in wif format.
+    /// Invalid private key represented in `wif` format.
     WifKey,
 }
 
@@ -291,22 +315,24 @@ pub trait Decrypt {
     ///     Err(Error::Pass)
     /// );
     /// assert_eq!(
-    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByQ".decrypt("Satoshi"), // <- Q
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByQ".decrypt("Satoshi"), // ← Q
     ///     Err(Error::Checksum)
     /// );
     /// assert_eq!(
-    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy".decrypt("Satoshi"), // <- q?
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy".decrypt("Satoshi"), // ← q?
     ///     Err(Error::EncKey)
     /// );
     /// assert_eq!(
-    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy!".decrypt("Satoshi"), // <- !
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy!".decrypt("Satoshi"), // ← !
     ///     Err(Error::Base58)
     /// );
     /// ```
     ///
     /// # Passphrase
     ///
-    /// This function handle the normalization (`nfc`) of the passphrase as specified on `bip-0038`.
+    /// This function handle the normalization (`nfc`) of the passphrase as specified on
+    /// `bip-0038`.
+    ///
     /// ```
     /// use bip38::Decrypt;
     ///
@@ -317,7 +343,90 @@ pub trait Decrypt {
     /// ```
     fn decrypt(&self, pass: &str) -> Result<([u8; 32], bool), Error>;
 
-    /// TODO: documentation
+    /// Decrypt an encrypted bitcoin private key in `str`format (both non-ec and ec), resulting on
+    /// a `wif` private key.
+    ///
+    /// This function targets strings of 58 base58 characters with the version prefix `6P` and
+    /// returns a `String` of base58 characters representing the decrypted private key in the `wif`
+    /// format.
+    ///
+    /// # Examples
+    ///
+    ///
+    /// ```
+    /// use bip38::Decrypt;
+    ///
+    /// // decryption of non elliptic curve multiplication
+    /// assert_eq!(
+    ///     "6PYMgbeR6XCsX4yJx8E52vW4PJDoTiu1QeFLn81KoW6Shye5DZ4ZnDauno".decrypt_to_wif("weakPass"),
+    ///     Ok(String::from("KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp"))
+    /// );
+    /// assert_eq!(
+    ///     "6PRVo8whL3QbdrXpKk3gP2dGuxDbuvMsMqUq2imVigrm8oyRbvBoRUsbB3".decrypt_to_wif("weakPass"),
+    ///     Ok(String::from("5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh"))
+    /// );
+    ///
+    /// // decryption of elliptic curve multiplication
+    /// assert_eq!(
+    ///     "6PnPQGcDuPhCMmXzTebiryx8zHxr8PZvUJccSxarn9nLHVLX7yVj6Wcoj9".decrypt_to_wif("weakPass"),
+    ///     Ok(String::from("Kyo7rXp5Qygn5qUFS39wR9DsxfrznTUc8XJeaHVSWhkVnhC4NVWE"))
+    /// );
+    /// assert_eq!(
+    ///     "6PfVV4eYCodt6tRiHbHH356MX818xZvcN54oNd1rCr8Cbme3273xWAgBhx".decrypt_to_wif("notWeak?"),
+    ///     Ok(String::from("5JPeaPgoWj6R9CEnSrvmGJh36e3cxRpGGpJ3mzTeK6M88Hc3Ttm"))
+    /// );
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// * `Error::Pass` is returned if an invalid passphrase is inserted.
+    ///
+    /// * `Error::EncKey` is returned if the target `str` is not an valid encrypted private key.
+    ///
+    /// * `Error::Checksum` is returned if the target `str` has valid encrypted private key format
+    /// but invalid checksum.
+    ///
+    /// * `Error::Base58` is returned if an non `base58` character is found.
+    ///
+    /// ```
+    /// use bip38::{Decrypt, Error};
+    ///
+    /// assert_eq!(
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq".decrypt_to_wif("Satoshi"),
+    ///     Ok(String::from("5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi5"))
+    /// );
+    /// assert_eq!(
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq".decrypt_to_wif("Nakamoto"),
+    ///     Err(Error::Pass)
+    /// );
+    /// assert_eq!( // Q
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByQ".decrypt_to_wif("Satoshi"),
+    ///     Err(Error::Checksum)
+    /// );
+    /// assert_eq!( // q?
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy".decrypt_to_wif("Satoshi"),
+    ///     Err(Error::EncKey)
+    /// );
+    /// assert_eq!( // !
+    ///     "6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWBy!".decrypt_to_wif("Satoshi"),
+    ///     Err(Error::Base58)
+    /// );
+    /// ```
+    ///
+    /// # Passphrase
+    ///
+    /// This function handle the normalization (`nfc`) of the passphrase as specified on
+    /// `bip-0038`.
+    ///
+    /// ```
+    /// use bip38::Decrypt;
+    ///
+    /// assert_eq!(
+    ///     "6PRW5o9FLp4gJDDVqJQKJFTpMvdsSGJxMYHtHaQBF3ooa8mwD69bapcDQn"
+    ///         .decrypt_to_wif("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}"),
+    ///     Ok(String::from("5Jajm8eQ22H3pGWLEVCXyvND8dQZhiQhoLJNKjYXk9roUFTMSZ4"))
+    /// );
+    /// ```
     fn decrypt_to_wif(&self, pass: &str) -> Result<String, Error>;
 }
 
@@ -371,8 +480,8 @@ pub trait Encrypt {
     ///         0x64, 0xee, 0xab, 0x5f, 0x9b, 0xe2, 0xa0, 0x1a, 0x83, 0x65, 0xa5, 0x79, 0x51, 0x1e,
     ///         0xb3, 0x37, 0x3c, 0x87, 0xc4, 0x0d, 0xa6, 0xd2, 0xa2, 0x5f, 0x05, 0xbd, 0xa6, 0x8f,
     ///         0xe0, 0x77, 0xb6, 0x6e
-    ///     ].encrypt("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}", false).unwrap(),
-    ///     "6PRW5o9FLp4gJDDVqJQKJFTpMvdsSGJxMYHtHaQBF3ooa8mwD69bapcDQn"
+    ///     ].encrypt("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}", false),
+    ///     Ok(String::from("6PRW5o9FLp4gJDDVqJQKJFTpMvdsSGJxMYHtHaQBF3ooa8mwD69bapcDQn"))
     /// );
     /// ```
     fn encrypt(&self, pass: &str, compress: bool) -> Result<String, Error>;
@@ -380,7 +489,69 @@ pub trait Encrypt {
 
 /// Allow encryption of bitcoin private keys in the `wif` format.
 pub trait EncryptWif {
-    /// TODO: documentation
+    /// Encrypt a bitcoin private key in the `wif` format (without elliptic curve multiplication)
+    /// into a `String` of 58 base58 characters according to the `wif` indication of a compressed
+    /// or uncompressed future public key (the prefix of the `wif` affects the prefix of the
+    /// encrypted private key).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use bip38::EncryptWif;
+    ///
+    /// assert_eq!(
+    ///     "KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp".encrypt_wif("weakPass"),
+    ///     Ok(String::from("6PYMgbeR6XCsX4yJx8E52vW4PJDoTiu1QeFLn81KoW6Shye5DZ4ZnDauno"))
+    /// );
+    /// assert_eq!(
+    ///     "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh".encrypt_wif("weakPass"),
+    ///     Ok(String::from("6PRVo8whL3QbdrXpKk3gP2dGuxDbuvMsMqUq2imVigrm8oyRbvBoRUsbB3"))
+    /// );
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// This function can fail due to decoding process of the target `wif` private key and if the
+    /// decoded private key can't result in a bitcoin address.
+    ///
+    /// ```
+    /// use bip38::{EncryptWif, Error};
+    ///
+    /// assert_eq!(
+    ///     "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi5".encrypt_wif("Satoshi"),
+    ///     Ok(String::from("6PRNFFkZc2NZ6dJqFfhRoFNMR9Lnyj7dYGrzdgXXVMXcxoKTePPX1dWByq"))
+    /// );
+    /// assert_eq!(
+    ///     "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi55".encrypt_wif("Satoshi"), // 55
+    ///     Err(Error::WifKey)
+    /// );
+    /// assert_eq!(
+    ///     "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi!".encrypt_wif("Satoshi"), // !
+    ///     Err(Error::Base58)
+    /// );
+    /// assert_eq!(
+    ///     "5HtasZ6ofTHP6HCwTqTkLDuLQisYPah7aUnSKfC7h4hMUVw2gi6".encrypt_wif("Satoshi"), // 6
+    ///     Err(Error::Checksum)
+    /// );
+    /// assert_eq!( // the payload of this wif is [0x00; 32]
+    ///     "KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73NUBByJr".encrypt_wif("Satoshi"),
+    ///     Err(Error::PrvKey)
+    /// );
+    /// ```
+    ///
+    /// # Passphrase
+    ///
+    /// This function handle the normalization (`nfc`) of the passphrase as specified on
+    /// `bip-0038`.
+    /// ```
+    /// use bip38::EncryptWif;
+    ///
+    /// assert_eq!(
+    ///     "5Jajm8eQ22H3pGWLEVCXyvND8dQZhiQhoLJNKjYXk9roUFTMSZ4"
+    ///         .encrypt_wif("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}"),
+    ///     Ok(String::from("6PRW5o9FLp4gJDDVqJQKJFTpMvdsSGJxMYHtHaQBF3ooa8mwD69bapcDQn"))
+    /// );
+    /// ```
     fn encrypt_wif(&self, pass: &str) -> Result<String, Error>;
 }
 
@@ -417,7 +588,7 @@ pub trait Generate {
     ///
     /// The only case this function can fail by itself is if the generated private key could not
     /// result in a bitcoin address. In this case the function results in `Error::PrvKey`. All
-    /// other errors are here for safety and are related to dependencies. This function don't 
+    /// other errors are here for safety and are related to dependencies. This function don't
     /// `unwrap` internally to let the decision to do or not to the developer using the crate.
     ///
     /// # Passphrase
@@ -987,12 +1158,12 @@ mod tests {
     #[test]
     fn test_decrypt_to_wif() {
         for (idx, ekey) in TV_ENCRYPTED.iter().enumerate() {
-            assert_eq!(ekey.decrypt_to_wif(TV_PASS[idx]), Ok(String::from(TV_WIF[idx])));
+            assert_eq!(ekey.decrypt_to_wif(TV_PASS[idx]).unwrap(), TV_WIF[idx]);
         }
         assert!(TV_ENCRYPTED[1].decrypt_to_wif("Satoshi").is_ok());
         assert_eq!(TV_ENCRYPTED[1].decrypt_to_wif("wrong"), Err(Error::Pass));
         assert_eq!(
-            TV_ENCRYPTED[1].replace("X", "x").decrypt_to_wif("Satoshi"), Err(Error::Checksum)
+            TV_ENCRYPTED[1].replace('X', "x").decrypt_to_wif("Satoshi"), Err(Error::Checksum)
         );
         assert_eq!(TV_ENCRYPTED[1][1..].decrypt_to_wif("Satoshi"), Err(Error::EncKey));
     }
@@ -1010,6 +1181,7 @@ mod tests {
             if idx > 2 { compress = true }
             assert_eq!(key.encrypt(TV_PASS[idx], compress).unwrap(), TV_ENCRYPTED[idx]);
         }
+        assert_eq!([0x00; 32].encrypt("I'm_a_passphrase", true), Err(Error::PrvKey));
     }
 
     #[test]
@@ -1017,6 +1189,13 @@ mod tests {
         for (idx, wif) in TV_WIF[..5].iter().enumerate() {
             assert_eq!(wif.encrypt_wif(TV_PASS[idx]).unwrap(), TV_ENCRYPTED[idx]);
         }
+        assert_eq!([TV_WIF[0], "a"].concat().encrypt_wif(TV_PASS[0]), Err(Error::WifKey));
+        assert_eq!(TV_WIF[0].replace('X', "!").encrypt_wif(TV_PASS[0]), Err(Error::Base58));
+        assert_eq!(TV_WIF[0].replace('X', "x").encrypt_wif(TV_PASS[0]), Err(Error::Checksum));
+        assert_eq!(
+            "KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73NUBByJr".encrypt_wif("pass"), // zeroed
+            Err(Error::PrvKey)
+        );
     }
 
     #[test]
