@@ -27,12 +27,12 @@
 //!
 //! // wif
 //! assert_eq!(
-//!     "KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp".encrypt_wif("strong_pass").unwrap(),
-//!     "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2"
+//!     "KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp".encrypt_wif("strong_pass"),
+//!     Ok(String::from("6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2"))
 //! );
 //! assert_eq!(
-//!     "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh".encrypt_wif("strong_pass").unwrap(),
-//!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2"
+//!     "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh".encrypt_wif("strong_pass"),
+//!     Ok(String::from("6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2"))
 //! );
 //! ```
 //!
@@ -56,11 +56,13 @@
 //!
 //! // wif
 //! assert_eq!(
-//!     "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2".decrypt_to_wif("strong_pass"),
+//!     "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2"
+//!         .decrypt_to_wif("strong_pass"),
 //!     Ok(String::from("KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp"))
 //! );
 //! assert_eq!(
-//!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2".decrypt_to_wif("strong_pass"),
+//!     "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2"
+//!         .decrypt_to_wif("strong_pass"),
 //!     Ok(String::from("5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh"))
 //! );
 //! ```
@@ -166,8 +168,6 @@
 //!     std::process::exit(1);
 //! });
 //! ```
-
-// TODO: main documentation, formatting and version
 
 use aes::Aes256;
 use aes::cipher::{
@@ -598,10 +598,10 @@ pub trait Generate {
     /// use bip38::{Decrypt, Generate};
     ///
     /// // true => compress
-    /// assert!("hopefully_an_strong_passphrase".generate(true).unwrap().starts_with("6Pn"));
+    /// assert!("hopefully_a_strong_passphrase".generate(true).unwrap().starts_with("6Pn"));
     ///
     /// // false => uncompress
-    /// assert!("hopefully_an_strong_passphrase".generate(false).unwrap().starts_with("6Pf"));
+    /// assert!("hopefully_a_strong_passphrase".generate(false).unwrap().starts_with("6Pf"));
     ///
     /// assert!("バンドメイド".generate(true).unwrap().decrypt("バンドメイド").is_ok());
     /// assert!("くるっぽー！".generate(false).unwrap().decrypt("くるっぽー！").is_ok());

@@ -35,12 +35,12 @@ assert_eq!([0x00; 32].encrypt("strong_pass", false), Err(Error::PrvKey));
 
 // wif
 assert_eq!(
-    "KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp".encrypt_wif("strong_pass").unwrap(),
-    "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2"
+    "KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp".encrypt_wif("strong_pass"),
+    Ok(String::from("6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2"))
 );
 assert_eq!(
-    "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh".encrypt_wif("strong_pass").unwrap(),
-    "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2"
+    "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh".encrypt_wif("strong_pass"),
+    Ok(String::from("6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2"))
 );
 ```
 
@@ -64,11 +64,13 @@ assert_eq!(
 
 // wif
 assert_eq!(
-    "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2".decrypt_to_wif("strong_pass"),
+    "6PYMgbeR64ypE4g8ZQhGo7ScudV5BLz1vMFUCs49AWpW3jVNWfH6cAdTi2"
+        .decrypt_to_wif("strong_pass"),
     Ok(String::from("KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp"))
 );
 assert_eq!(
-    "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2".decrypt_to_wif("strong_pass"),
+    "6PRVo8whLAhpRwSM5tJfmbAbZ9mCxjyZExaTXt6EMSXw3f5QJxMDFQQND2"
+        .decrypt_to_wif("strong_pass"),
     Ok(String::from("5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh"))
 );
 ```
