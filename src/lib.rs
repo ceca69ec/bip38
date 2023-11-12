@@ -199,6 +199,7 @@ use aes::cipher::{
     NewBlockCipher
 };
 use digest::Digest;
+use rand::{RngCore};
 use ripemd160::Ripemd160;
 use scrypt::Params;
 use secp256k1::{Secp256k1, SecretKey, PublicKey};
@@ -651,7 +652,10 @@ pub trait Generate {
     ///         .decrypt("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}").is_ok()
     /// );
     /// ```
-    fn generate(&self, compress: bool) -> Result<String, Error>;
+    #[cfg(feature = "std")]
+    fn generate<R: RngCore>(&self, compress: bool) -> Result<String, Error>;
+
+    fn generate_rng<R: RngCore>(&self, compress: bool, rng: &mut R) -> Result<String, Error>;
 }
 
 /// Internal trait to manipulate private keys (32 bytes).
@@ -802,13 +806,17 @@ impl Encrypt for [u8; 32] {
 }
 
 impl Generate for str {
-    #[inline]
-    fn generate(&self, compress: bool) -> Result<String, Error> {
+    #[cfg(feature = "std")]
+    fn generate<R: RngCore>(&self, compress: bool) -> Result<String, Error> {
+        self.generate_rng(compress, &mut rand::thread_rng())
+    }
+
+    fn generate_rng<R: RngCore>(&self, compress: bool, rng: &mut R) -> Result<String, Error> {
         let mut owner_salt = [0x00; 8];
         let mut pass_factor = [0x00; 32];
         let mut seed_b = [0x00; 24];
 
-        fill_random_bytes(&mut owner_salt);
+        rng.fill_bytes(&mut owner_salt);
 
         scrypt::scrypt(
             self.nfc().collect::<String>().as_bytes(),
@@ -821,7 +829,7 @@ impl Generate for str {
 
         let mut pass_point_mul = PublicKey::from_slice(&pass_point).map_err(|_| Error::PubKey)?;
 
-        fill_random_bytes(&mut seed_b);
+        rng.fill_bytes(&mut seed_b);
 
         let factor_b = seed_b.hash256();
 
@@ -885,17 +893,6 @@ impl Generate for str {
 
         Ok(result_bytes.encode_base58ck())
     }
-}
-
-#[inline]
-fn fill_random_bytes(buf: &mut [u8]) {
-    #[cfg(feature = "std")]
-    {
-        use rand::RngCore;
-        rand::thread_rng().fill_bytes(buf)
-    }
-    // TODO: no_std
-    let _ = buf;
 }
 
 impl PrivateKeyManipulation for [u8; 32] {
