@@ -255,6 +255,8 @@ pub enum Error {
     WifKey,
 }
 
+impl std::error::Error for Error {}
+
 /// Internal Functions to manipulate an arbitrary number of bytes [u8].
 trait BytesManipulation {
     /// Encode informed data in base 58 check.
