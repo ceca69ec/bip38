@@ -169,6 +169,28 @@
 //! });
 //! ```
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+#[cfg(not(feature = "std"))]
+use alloc::{
+    string::String,
+    vec::Vec,
+    vec
+};
+
+#[cfg(feature = "std")]
+extern crate std;
+
+#[cfg(feature = "std")]
+use std::{
+    string::String,
+    vec,
+    vec::Vec,
+};
+
 use aes::Aes256;
 use aes::cipher::{
     BlockDecrypt,
@@ -176,11 +198,11 @@ use aes::cipher::{
     generic_array::GenericArray,
     NewBlockCipher
 };
-use rand::RngCore;
+use digest::Digest;
+use rand::{RngCore};
 use ripemd160::Ripemd160;
 use scrypt::Params;
 use secp256k1::{Secp256k1, SecretKey, PublicKey};
-use sha2::Digest;
 use unicode_normalization::UnicodeNormalization;
 
 /// Number of base58 characters on every encrypted private key.
@@ -254,6 +276,9 @@ pub enum Error {
     /// Invalid private key represented in `wif` format.
     WifKey,
 }
+
+#[cfg(feature = "std")]
+impl std::error::Error for Error {}
 
 /// Internal Functions to manipulate an arbitrary number of bytes [u8].
 trait BytesManipulation {
@@ -627,7 +652,10 @@ pub trait Generate {
     ///         .decrypt("\u{03d2}\u{0301}\u{0000}\u{010400}\u{01f4a9}").is_ok()
     /// );
     /// ```
-    fn generate(&self, compress: bool) -> Result<String, Error>;
+    #[cfg(feature = "std")]
+    fn generate<R: RngCore>(&self, compress: bool) -> Result<String, Error>;
+
+    fn generate_rng<R: RngCore>(&self, compress: bool, rng: &mut R) -> Result<String, Error>;
 }
 
 /// Internal trait to manipulate private keys (32 bytes).
@@ -683,6 +711,7 @@ impl BytesManipulation for [u8] {
     #[inline]
     fn hash160(&self) -> [u8; 20] {
         let mut result = [0x00; 20];
+        use ripemd160::Digest;
         result[..].copy_from_slice(&Ripemd160::digest(&sha2::Sha256::digest(self)));
         result
     }
@@ -690,7 +719,7 @@ impl BytesManipulation for [u8] {
     #[inline]
     fn hash256(&self) -> [u8; 32] {
         let mut result = [0x00; 32];
-        result[..].copy_from_slice(&sha2::Sha256::digest(&sha2::Sha256::digest(self)));
+        result[..].copy_from_slice(&sha2::Sha256::digest(sha2::Sha256::digest(self)));
         result
     }
 
@@ -777,13 +806,17 @@ impl Encrypt for [u8; 32] {
 }
 
 impl Generate for str {
-    #[inline]
-    fn generate(&self, compress: bool) -> Result<String, Error> {
+    #[cfg(feature = "std")]
+    fn generate<R: RngCore>(&self, compress: bool) -> Result<String, Error> {
+        self.generate_rng(compress, &mut rand::thread_rng())
+    }
+
+    fn generate_rng<R: RngCore>(&self, compress: bool, rng: &mut R) -> Result<String, Error> {
         let mut owner_salt = [0x00; 8];
         let mut pass_factor = [0x00; 32];
         let mut seed_b = [0x00; 24];
 
-        rand::thread_rng().fill_bytes(&mut owner_salt);
+        rng.fill_bytes(&mut owner_salt);
 
         scrypt::scrypt(
             self.nfc().collect::<String>().as_bytes(),
@@ -796,7 +829,7 @@ impl Generate for str {
 
         let mut pass_point_mul = PublicKey::from_slice(&pass_point).map_err(|_| Error::PubKey)?;
 
-        rand::thread_rng().fill_bytes(&mut seed_b);
+        rng.fill_bytes(&mut seed_b);
 
         let factor_b = seed_b.hash256();
 
@@ -1157,7 +1190,7 @@ mod tests {
             Err(Error::WifKey)
         );
         assert_eq!(
-            "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9".replace("d", "b").decode_wif(),
+            "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9".replace('d', "b").decode_wif(),
             Err(Error::Checksum)
         );
         assert_eq!(["a"; 51].concat().decode_wif(), Err(Error::WifKey));
@@ -1174,7 +1207,7 @@ mod tests {
         }
         assert!(TV_ENCRYPTED[1].decrypt("Satoshi").is_ok());
         assert_eq!(TV_ENCRYPTED[1].decrypt("wrong"), Err(Error::Pass));
-        assert_eq!(TV_ENCRYPTED[1].replace("X", "x").decrypt("Satoshi"), Err(Error::Checksum));
+        assert_eq!(TV_ENCRYPTED[1].replace('X', "x").decrypt("Satoshi"), Err(Error::Checksum));
         assert_eq!(TV_ENCRYPTED[1][1..].decrypt("Satoshi"), Err(Error::EncKey));
     }
 
