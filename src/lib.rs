@@ -821,7 +821,7 @@ impl Generate for str {
 
         let mut pass_point_mul = PublicKey::from_slice(&pass_point).map_err(|_| Error::PubKey)?;
 
-        fill_random_bytes(&mut owner_salt);
+        fill_random_bytes(&mut seed_b);
 
         let factor_b = seed_b.hash256();
 
