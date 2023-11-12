@@ -169,6 +169,23 @@
 //! });
 //! ```
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(not(feature = "std"))]
+extern crate alloc;
+
+#[cfg(not(feature = "std"))]
+use alloc::{
+    string::String,
+    vec::Vec,
+    vec
+};
+
+fn f() {
+    let s = String::new();
+    Secp256k1::<secp256k1::All>::new();
+}
+
 use aes::Aes256;
 use aes::cipher::{
     BlockDecrypt,
@@ -177,10 +194,10 @@ use aes::cipher::{
     NewBlockCipher
 };
 use rand::RngCore;
+use digest::Digest;
 use ripemd160::Ripemd160;
 use scrypt::Params;
 use secp256k1::{Secp256k1, SecretKey, PublicKey};
-use sha2::Digest;
 use unicode_normalization::UnicodeNormalization;
 
 /// Number of base58 characters on every encrypted private key.
@@ -255,6 +272,7 @@ pub enum Error {
     WifKey,
 }
 
+#[cfg(feature = "std")]
 impl std::error::Error for Error {}
 
 /// Internal Functions to manipulate an arbitrary number of bytes [u8].
@@ -685,6 +703,7 @@ impl BytesManipulation for [u8] {
     #[inline]
     fn hash160(&self) -> [u8; 20] {
         let mut result = [0x00; 20];
+        use ripemd160::Digest;
         result[..].copy_from_slice(&Ripemd160::digest(&sha2::Sha256::digest(self)));
         result
     }
@@ -785,7 +804,7 @@ impl Generate for str {
         let mut pass_factor = [0x00; 32];
         let mut seed_b = [0x00; 24];
 
-        rand::thread_rng().fill_bytes(&mut owner_salt);
+        // rand::thread_rng().fill_bytes(&mut owner_salt);
 
         scrypt::scrypt(
             self.nfc().collect::<String>().as_bytes(),
@@ -798,7 +817,8 @@ impl Generate for str {
 
         let mut pass_point_mul = PublicKey::from_slice(&pass_point).map_err(|_| Error::PubKey)?;
 
-        rand::thread_rng().fill_bytes(&mut seed_b);
+        // TODO: RNG
+        // rand::thread_rng().fill_bytes(&mut seed_b);
 
         let factor_b = seed_b.hash256();
 
