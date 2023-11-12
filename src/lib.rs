@@ -198,7 +198,6 @@ use aes::cipher::{
     generic_array::GenericArray,
     NewBlockCipher
 };
-use rand::RngCore;
 use digest::Digest;
 use ripemd160::Ripemd160;
 use scrypt::Params;
@@ -716,7 +715,7 @@ impl BytesManipulation for [u8] {
     #[inline]
     fn hash256(&self) -> [u8; 32] {
         let mut result = [0x00; 32];
-        result[..].copy_from_slice(&sha2::Sha256::digest(&sha2::Sha256::digest(self)));
+        result[..].copy_from_slice(&sha2::Sha256::digest(sha2::Sha256::digest(self)));
         result
     }
 
@@ -888,10 +887,15 @@ impl Generate for str {
     }
 }
 
+#[inline]
 fn fill_random_bytes(buf: &mut [u8]) {
     #[cfg(feature = "std")]
-    rand::thread_rng().fill_bytes(buf)
+    {
+        use rand::RngCore;
+        rand::thread_rng().fill_bytes(buf)
+    }
     // TODO: no_std
+    let _ = buf;
 }
 
 impl PrivateKeyManipulation for [u8; 32] {
@@ -1189,7 +1193,7 @@ mod tests {
             Err(Error::WifKey)
         );
         assert_eq!(
-            "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9".replace("d", "b").decode_wif(),
+            "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9".replace('d', "b").decode_wif(),
             Err(Error::Checksum)
         );
         assert_eq!(["a"; 51].concat().decode_wif(), Err(Error::WifKey));
@@ -1206,7 +1210,7 @@ mod tests {
         }
         assert!(TV_ENCRYPTED[1].decrypt("Satoshi").is_ok());
         assert_eq!(TV_ENCRYPTED[1].decrypt("wrong"), Err(Error::Pass));
-        assert_eq!(TV_ENCRYPTED[1].replace("X", "x").decrypt("Satoshi"), Err(Error::Checksum));
+        assert_eq!(TV_ENCRYPTED[1].replace('X', "x").decrypt("Satoshi"), Err(Error::Checksum));
         assert_eq!(TV_ENCRYPTED[1][1..].decrypt("Satoshi"), Err(Error::EncKey));
     }
 
