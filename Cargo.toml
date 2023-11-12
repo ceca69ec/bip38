@@ -30,4 +30,4 @@ unicode-normalization = { version = "0.1.19", default-features = false }
 
 [features]
 default = ["std"]
-std = ["rand/std", "sha2/std", "unicode-normalization/std", "digest/std"]
+std = ["rand/std", "rand/std_rng", "sha2/std", "unicode-normalization/std", "digest/std"]

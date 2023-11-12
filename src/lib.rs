@@ -181,10 +181,15 @@ use alloc::{
     vec
 };
 
-fn f() {
-    let s = String::new();
-    Secp256k1::<secp256k1::All>::new();
-}
+#[cfg(feature = "std")]
+extern crate std;
+
+#[cfg(feature = "std")]
+use std::{
+    string::String,
+    vec,
+    vec::Vec,
+};
 
 use aes::Aes256;
 use aes::cipher::{
@@ -804,7 +809,7 @@ impl Generate for str {
         let mut pass_factor = [0x00; 32];
         let mut seed_b = [0x00; 24];
 
-        // rand::thread_rng().fill_bytes(&mut owner_salt);
+        fill_random_bytes(&mut owner_salt);
 
         scrypt::scrypt(
             self.nfc().collect::<String>().as_bytes(),
@@ -817,8 +822,7 @@ impl Generate for str {
 
         let mut pass_point_mul = PublicKey::from_slice(&pass_point).map_err(|_| Error::PubKey)?;
 
-        // TODO: RNG
-        // rand::thread_rng().fill_bytes(&mut seed_b);
+        fill_random_bytes(&mut owner_salt);
 
         let factor_b = seed_b.hash256();
 
@@ -882,6 +886,12 @@ impl Generate for str {
 
         Ok(result_bytes.encode_base58ck())
     }
+}
+
+fn fill_random_bytes(buf: &mut [u8]) {
+    #[cfg(feature = "std")]
+    rand::thread_rng().fill_bytes(buf)
+    // TODO: no_std
 }
 
 impl PrivateKeyManipulation for [u8; 32] {
