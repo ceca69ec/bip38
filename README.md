@@ -122,7 +122,7 @@ You can use this crate in your project by adding the following to your `Cargo.to
 
 ```toml
 [dependencies]
-bip38 = "1.1.0"
+bip38 = "1.1.1"
 ```
 
 For more details and examples please go to the [documentation](https://docs.rs/bip38).

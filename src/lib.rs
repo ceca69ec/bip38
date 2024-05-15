@@ -115,7 +115,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! bip38 = "1.1.0"
+//! bip38 = "1.1.1"
 //! ```
 //!
 //! #### Decrypting
@@ -169,17 +169,13 @@
 //! });
 //! ```
 
+use aes::cipher::KeyInit;
+use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt};
 use aes::Aes256;
-use aes::cipher::{
-    BlockDecrypt,
-    BlockEncrypt,
-    generic_array::GenericArray,
-    NewBlockCipher
-};
 use rand::RngCore;
-use ripemd160::Ripemd160;
+use ripemd::Ripemd160;
 use scrypt::Params;
-use secp256k1::{Secp256k1, SecretKey, PublicKey};
+use secp256k1::{PublicKey, Scalar, Secp256k1, SecretKey};
 use sha2::Digest;
 use unicode_normalization::UnicodeNormalization;
 
@@ -191,6 +187,9 @@ const LEN_WIFC: usize = 52;
 
 /// Number of base58 characters in a wif uncompressed secret key.
 const LEN_WIFU: usize = 51;
+
+/// Length of the scrypt parameter
+const LEN_SCRY: usize = 64;
 
 /// Number of bytes of a public key compressed.
 const NBBY_PUBC: usize = 33;
@@ -667,7 +666,7 @@ impl core::fmt::Display for Error {
             Error::PubKey => write!(f, "invalid public key"),
             Error::ScryptFn => write!(f, "failure on scrypt function"),
             Error::ScryptParam => write!(f, "invalid scrypt parameter"),
-            Error::WifKey => write!(f, "invalid wif private key")
+            Error::WifKey => write!(f, "invalid wif private key"),
         }
     }
 }
@@ -696,7 +695,9 @@ impl BytesManipulation for [u8] {
 
     #[inline]
     fn p2wpkh(&self) -> Result<String, Error> {
-        if self.len() != NBBY_PUBC && self.len() != NBBY_PUBU { return Err(Error::NbPubB); }
+        if self.len() != NBBY_PUBC && self.len() != NBBY_PUBU {
+            return Err(Error::NbPubB);
+        }
         let mut address_bytes = vec![0x00];
         address_bytes.append(&mut self.hash160().to_vec());
         Ok(address_bytes.encode_base58ck())
@@ -715,7 +716,7 @@ impl Decrypt for str {
                 self.decrypt_ec(pass)?
             } else {
                 return Err(Error::EncKey);
-            }
+            },
         )
     }
 
@@ -746,9 +747,10 @@ impl Encrypt for [u8; 32] {
         scrypt::scrypt(
             pass.nfc().collect::<String>().as_bytes(),
             checksum,
-            &Params::new(14, 8, 8).map_err(|_| Error::ScryptParam)?,
-            &mut scrypt_key
-        ).map_err(|_| Error::ScryptFn)?;
+            &Params::new(14, 8, 8, LEN_SCRY).map_err(|_| Error::ScryptParam)?,
+            &mut scrypt_key,
+        )
+        .map_err(|_| Error::ScryptFn)?;
 
         let mut half1 = [0x00; 32];
         half1[..].copy_from_slice(&scrypt_key[..32]);
@@ -788,9 +790,10 @@ impl Generate for str {
         scrypt::scrypt(
             self.nfc().collect::<String>().as_bytes(),
             &owner_salt,
-            &Params::new(14, 8, 8).map_err(|_| Error::ScryptParam)?,
-            &mut pass_factor
-        ).map_err(|_| Error::ScryptFn)?;
+            &Params::new(14, 8, 8, LEN_SCRY).map_err(|_| Error::ScryptParam)?,
+            &mut pass_factor,
+        )
+        .map_err(|_| Error::ScryptFn)?;
 
         let pass_point = pass_factor.public(true)?;
 
@@ -798,9 +801,11 @@ impl Generate for str {
 
         rand::thread_rng().fill_bytes(&mut seed_b);
 
-        let factor_b = seed_b.hash256();
+        let factor_b = Scalar::from_be_bytes(seed_b.hash256()).map_err(|_| Error::EcMul)?;
 
-        pass_point_mul.mul_assign(&Secp256k1::new(), &factor_b).map_err(|_| Error::EcMul)?;
+        pass_point_mul = pass_point_mul
+            .mul_tweak(&Secp256k1::new(), &factor_b)
+            .map_err(|_| Error::EcMul)?;
 
         let pubk = if compress {
             pass_point_mul.serialize().to_vec()
@@ -819,9 +824,10 @@ impl Generate for str {
         scrypt::scrypt(
             &pass_point,
             &salt,
-            &Params::new(10, 1, 1).map_err(|_| Error::ScryptParam)?,
-            &mut seed_b_pass
-        ).map_err(|_| Error::ScryptFn)?;
+            &Params::new(10, 1, 1, LEN_SCRY).map_err(|_| Error::ScryptParam)?,
+            &mut seed_b_pass,
+        )
+        .map_err(|_| Error::ScryptFn)?;
 
         let derived_half1 = &seed_b_pass[..32];
         let derived_half2 = &seed_b_pass[32..];
@@ -867,7 +873,7 @@ impl PrivateKeyManipulation for [u8; 32] {
     fn public(&self, compress: bool) -> Result<Vec<u8>, Error> {
         let secp_pub = PublicKey::from_secret_key(
             &Secp256k1::new(),
-            &SecretKey::from_slice(self).map_err(|_| Error::PrvKey)?
+            &SecretKey::from_slice(self).map_err(|_| Error::PrvKey)?,
         );
 
         if compress {
@@ -881,7 +887,9 @@ impl PrivateKeyManipulation for [u8; 32] {
     fn wif(&self, compress: bool) -> String {
         let mut decoded: Vec<u8> = vec![PRE_WIFB];
         decoded.append(&mut self.to_vec());
-        if compress { decoded.push(0x01); }
+        if compress {
+            decoded.push(0x01);
+        }
         decoded.encode_base58ck()
     }
 }
@@ -899,14 +907,16 @@ impl StringManipulation for str {
 
     #[inline]
     fn decode_wif(&self) -> Result<([u8; 32], bool), Error> {
-        if (!self.is_char_boundary(1) || !PRE_WIFC.contains(&self[..1]) ||
-            self.len() != LEN_WIFC) && (!self.starts_with(PRE_WIFU) || self.len() != LEN_WIFU) {
+        if (!self.is_char_boundary(1) || !PRE_WIFC.contains(&self[..1]) || self.len() != LEN_WIFC)
+            && (!self.starts_with(PRE_WIFU) || self.len() != LEN_WIFU)
+        {
             return Err(Error::WifKey);
         }
         let raw_bytes = self.decode_base58ck()?;
-        if (raw_bytes.len() != NBBY_WIFC && raw_bytes.len() != NBBY_WIFU) ||
-            raw_bytes[0] != PRE_WIFB {
-            return Err(Error::WifKey)
+        if (raw_bytes.len() != NBBY_WIFC && raw_bytes.len() != NBBY_WIFU)
+            || raw_bytes[0] != PRE_WIFB
+        {
+            return Err(Error::WifKey);
         }
         let mut result = [0x00; 32];
         result[..].copy_from_slice(&raw_bytes[1..33]);
@@ -916,7 +926,9 @@ impl StringManipulation for str {
     #[inline]
     fn decrypt_ec(&self, pass: &str) -> Result<([u8; 32], bool), Error> {
         let eprvk = self.decode_base58ck()?;
-        if eprvk[..2] != PRE_EC { return Err(Error::EncKey); }
+        if eprvk[..2] != PRE_EC {
+            return Err(Error::EncKey);
+        }
         let address_hash = &eprvk[3..7];
         let encrypted_p1 = &eprvk[15..23];
         let encrypted_p2 = &eprvk[23..39];
@@ -931,9 +943,10 @@ impl StringManipulation for str {
         scrypt::scrypt(
             pass.nfc().collect::<String>().as_bytes(),
             owner_salt,
-            &Params::new(14, 8, 8).map_err(|_| Error::ScryptParam)?,
-            &mut pre_factor
-        ).map_err(|_| Error::ScryptFn)?;
+            &Params::new(14, 8, 8, LEN_SCRY).map_err(|_| Error::ScryptParam)?,
+            &mut pre_factor,
+        )
+        .map_err(|_| Error::ScryptFn)?;
 
         if has_lot {
             let mut tmp: Vec<u8> = Vec::new();
@@ -950,9 +963,10 @@ impl StringManipulation for str {
         scrypt::scrypt(
             &pass_point,
             &eprvk[3..15], // 1024 log2 = 10
-            &Params::new(10, 1, 1).map_err(|_| Error::ScryptParam)?,
-            &mut seed_b_pass
-        ).map_err(|_| Error::ScryptFn)?;
+            &Params::new(10, 1, 1, LEN_SCRY).map_err(|_| Error::ScryptParam)?,
+            &mut seed_b_pass,
+        )
+        .map_err(|_| Error::ScryptFn)?;
 
         let derived_half1 = &seed_b_pass[..32];
         let derived_half2 = &seed_b_pass[32..];
@@ -987,10 +1001,11 @@ impl StringManipulation for str {
 
         let factor_b = seed_b.hash256();
 
-        let mut prv = SecretKey::from_slice(&pass_factor)
-            .map_err(|_| Error::PrvKey)?;
+        let mut prv = SecretKey::from_slice(&pass_factor).map_err(|_| Error::PrvKey)?;
 
-        prv.mul_assign(&factor_b).map_err(|_| Error::PrvKey)?;
+        prv = prv
+            .mul_tweak(&Scalar::from_be_bytes(factor_b).map_err(|_| Error::EcMul)?)
+            .map_err(|_| Error::PrvKey)?;
 
         let mut result = [0x00; 32];
         result[..].copy_from_slice(&prv[..]);
@@ -998,7 +1013,9 @@ impl StringManipulation for str {
         let address = result.public(compress)?.p2wpkh()?;
         let checksum = &address.as_bytes().hash256()[..4];
 
-        if checksum != address_hash { return Err(Error::Pass) }
+        if checksum != address_hash {
+            return Err(Error::Pass);
+        }
 
         Ok((result, compress))
     }
@@ -1006,16 +1023,19 @@ impl StringManipulation for str {
     #[inline]
     fn decrypt_non_ec(&self, pass: &str) -> Result<([u8; 32], bool), Error> {
         let eprvk = self.decode_base58ck()?;
-        if eprvk[..2] != PRE_NON_EC { return Err(Error::EncKey); }
+        if eprvk[..2] != PRE_NON_EC {
+            return Err(Error::EncKey);
+        }
         let compress = (eprvk[2] & 0x20) == 0x20;
         let mut scrypt_key = [0x00; 64];
 
         scrypt::scrypt(
             pass.nfc().collect::<String>().as_bytes(),
             &eprvk[3..7], // 16384 log2 = 14
-            &Params::new(14, 8, 8).map_err(|_| Error::ScryptParam)?,
-            &mut scrypt_key
-        ).map_err(|_| Error::ScryptFn)?;
+            &Params::new(14, 8, 8, LEN_SCRY).map_err(|_| Error::ScryptParam)?,
+            &mut scrypt_key,
+        )
+        .map_err(|_| Error::ScryptFn)?;
 
         let cipher = Aes256::new(GenericArray::from_slice(&scrypt_key[32..]));
 
@@ -1037,7 +1057,9 @@ impl StringManipulation for str {
         let address = prvk.public(compress)?.p2wpkh()?;
         let checksum = &address.as_bytes().hash256()[..4];
 
-        if checksum != &eprvk[3..7] { return Err(Error::Pass) }
+        if checksum != &eprvk[3..7] {
+            return Err(Error::Pass);
+        }
 
         Ok((prvk, compress))
     }
@@ -1056,7 +1078,7 @@ mod tests {
         "6PfQu77ygVyJLZjfvMLyhLMQbYnu5uguoJJ4kMCLqWwPEdfpwANVS76gTX",
         "6PfLGnQs6VZnrNpmVKfjotbnQuaJK4KZoPFrAjx1JMJUa1Ft8gnf5WxfKd",
         "6PgNBNNzDkKdhkT6uJntUXwwzQV8Rr2tZcbkDcuC9DZRsS6AtHts4Ypo1j",
-        "6PgGWtx25kUg8QWvwuJAgorN6k9FbE25rv5dMRwu5SKMnfpfVe5mar2ngH"
+        "6PgGWtx25kUg8QWvwuJAgorN6k9FbE25rv5dMRwu5SKMnfpfVe5mar2ngH",
     ];
 
     /// Resulting keys from bip-0038 test vectors.
@@ -1064,48 +1086,48 @@ mod tests {
         [
             0xcb, 0xf4, 0xb9, 0xf7, 0x04, 0x70, 0x85, 0x6b, 0xb4, 0xf4, 0x0f, 0x80, 0xb8, 0x7e,
             0xdb, 0x90, 0x86, 0x59, 0x97, 0xff, 0xee, 0x6d, 0xf3, 0x15, 0xab, 0x16, 0x6d, 0x71,
-            0x3a, 0xf4, 0x33, 0xa5
+            0x3a, 0xf4, 0x33, 0xa5,
         ],
         [
             0x09, 0xc2, 0x68, 0x68, 0x80, 0x09, 0x5b, 0x1a, 0x4c, 0x24, 0x9e, 0xe3, 0xac, 0x4e,
             0xea, 0x8a, 0x01, 0x4f, 0x11, 0xe6, 0xf9, 0x86, 0xd0, 0xb5, 0x02, 0x5a, 0xc1, 0xf3,
-            0x9a, 0xfb, 0xd9, 0xae
+            0x9a, 0xfb, 0xd9, 0xae,
         ],
         [
             0x64, 0xee, 0xab, 0x5f, 0x9b, 0xe2, 0xa0, 0x1a, 0x83, 0x65, 0xa5, 0x79, 0x51, 0x1e,
             0xb3, 0x37, 0x3c, 0x87, 0xc4, 0x0d, 0xa6, 0xd2, 0xa2, 0x5f, 0x05, 0xbd, 0xa6, 0x8f,
-            0xe0, 0x77, 0xb6, 0x6e
+            0xe0, 0x77, 0xb6, 0x6e,
         ],
         [
             0xcb, 0xf4, 0xb9, 0xf7, 0x04, 0x70, 0x85, 0x6b, 0xb4, 0xf4, 0x0f, 0x80, 0xb8, 0x7e,
             0xdb, 0x90, 0x86, 0x59, 0x97, 0xff, 0xee, 0x6d, 0xf3, 0x15, 0xab, 0x16, 0x6d, 0x71,
-            0x3a, 0xf4, 0x33, 0xa5
+            0x3a, 0xf4, 0x33, 0xa5,
         ],
         [
             0x09, 0xc2, 0x68, 0x68, 0x80, 0x09, 0x5b, 0x1a, 0x4c, 0x24, 0x9e, 0xe3, 0xac, 0x4e,
             0xea, 0x8a, 0x01, 0x4f, 0x11, 0xe6, 0xf9, 0x86, 0xd0, 0xb5, 0x02, 0x5a, 0xc1, 0xf3,
-            0x9a, 0xfb, 0xd9, 0xae
+            0x9a, 0xfb, 0xd9, 0xae,
         ],
         [
             0xa4, 0x3a, 0x94, 0x05, 0x77, 0xf4, 0xe9, 0x7f, 0x5c, 0x4d, 0x39, 0xeb, 0x14, 0xff,
             0x08, 0x3a, 0x98, 0x18, 0x7c, 0x64, 0xea, 0x7c, 0x99, 0xef, 0x7c, 0xe4, 0x60, 0x83,
-            0x39, 0x59, 0xa5, 0x19
+            0x39, 0x59, 0xa5, 0x19,
         ],
         [
             0xc2, 0xc8, 0x03, 0x6d, 0xf2, 0x68, 0xf4, 0x98, 0x09, 0x93, 0x50, 0x71, 0x8c, 0x4a,
             0x3e, 0xf3, 0x98, 0x4d, 0x2b, 0xe8, 0x46, 0x18, 0xc2, 0x65, 0x0f, 0x51, 0x71, 0xdc,
-            0xc5, 0xeb, 0x66, 0x0a
+            0xc5, 0xeb, 0x66, 0x0a,
         ],
         [
             0x44, 0xea, 0x95, 0xaf, 0xbf, 0x13, 0x83, 0x56, 0xa0, 0x5e, 0xa3, 0x21, 0x10, 0xdf,
             0xd6, 0x27, 0x23, 0x2d, 0x0f, 0x29, 0x91, 0xad, 0x22, 0x11, 0x87, 0xbe, 0x35, 0x6f,
-            0x19, 0xfa, 0x81, 0x90
+            0x19, 0xfa, 0x81, 0x90,
         ],
         [
             0xca, 0x27, 0x59, 0xaa, 0x4a, 0xdb, 0x0f, 0x96, 0xc4, 0x14, 0xf3, 0x6a, 0xbe, 0xb8,
             0xdb, 0x59, 0x34, 0x29, 0x85, 0xbe, 0x9f, 0xa5, 0x0f, 0xaa, 0xc2, 0x28, 0xc8, 0xe7,
-            0xd9, 0x0e, 0x30, 0x06
-        ]
+            0xd9, 0x0e, 0x30, 0x06,
+        ],
     ];
 
     /// Passphrases from bip-0038 test vectors.
@@ -1118,7 +1140,7 @@ mod tests {
         "TestingOneTwoThree",
         "Satoshi",
         "MOLON LABE",
-        "ΜΟΛΩΝ ΛΑΒΕ"
+        "ΜΟΛΩΝ ΛΑΒΕ",
     ];
 
     /// Wif private keys from bip-0038 test vectors.
@@ -1131,7 +1153,7 @@ mod tests {
         "5K4caxezwjGCGfnoPTZ8tMcJBLB7Jvyjv4xxeacadhq8nLisLR2",
         "5KJ51SgxWaAYR13zd9ReMhJpwrcX47xTJh2D3fGPG9CM8vkv5sH",
         "5JLdxTtcTHcfYcmJsNVy1v2PMDx432JPoYcBTVVRHpPaxUrdtf8",
-        "5KMKKuUmAkiNbA3DazMQiLfDq47qs8MAEThm4yL8R2PhV1ov33D"
+        "5KMKKuUmAkiNbA3DazMQiLfDq47qs8MAEThm4yL8R2PhV1ov33D",
     ];
 
     #[test]
@@ -1153,11 +1175,15 @@ mod tests {
             Ok(([0x69; 32], false))
         );
         assert_eq!(
-            ["KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9", "a"].concat().decode_wif(),
+            ["KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9", "a"]
+                .concat()
+                .decode_wif(),
             Err(Error::WifKey)
         );
         assert_eq!(
-            "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9".replace("d", "b").decode_wif(),
+            "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9"
+                .replace("d", "b")
+                .decode_wif(),
             Err(Error::Checksum)
         );
         assert_eq!(["a"; 51].concat().decode_wif(), Err(Error::WifKey));
@@ -1168,13 +1194,20 @@ mod tests {
     fn test_decrypt() {
         let mut compress = false;
         for (idx, ekey) in TV_ENCRYPTED.iter().enumerate() {
-            if idx > 2 { compress = true }
-            if idx > 4 { compress = false }
+            if idx > 2 {
+                compress = true
+            }
+            if idx > 4 {
+                compress = false
+            }
             assert_eq!(ekey.decrypt(TV_PASS[idx]), Ok((TV_KEY[idx], compress)));
         }
         assert!(TV_ENCRYPTED[1].decrypt("Satoshi").is_ok());
         assert_eq!(TV_ENCRYPTED[1].decrypt("wrong"), Err(Error::Pass));
-        assert_eq!(TV_ENCRYPTED[1].replace("X", "x").decrypt("Satoshi"), Err(Error::Checksum));
+        assert_eq!(
+            TV_ENCRYPTED[1].replace("X", "x").decrypt("Satoshi"),
+            Err(Error::Checksum)
+        );
         assert_eq!(TV_ENCRYPTED[1][1..].decrypt("Satoshi"), Err(Error::EncKey));
     }
 
@@ -1186,9 +1219,13 @@ mod tests {
         assert!(TV_ENCRYPTED[1].decrypt_to_wif("Satoshi").is_ok());
         assert_eq!(TV_ENCRYPTED[1].decrypt_to_wif("wrong"), Err(Error::Pass));
         assert_eq!(
-            TV_ENCRYPTED[1].replace('X', "x").decrypt_to_wif("Satoshi"), Err(Error::Checksum)
+            TV_ENCRYPTED[1].replace('X', "x").decrypt_to_wif("Satoshi"),
+            Err(Error::Checksum)
         );
-        assert_eq!(TV_ENCRYPTED[1][1..].decrypt_to_wif("Satoshi"), Err(Error::EncKey));
+        assert_eq!(
+            TV_ENCRYPTED[1][1..].decrypt_to_wif("Satoshi"),
+            Err(Error::EncKey)
+        );
     }
 
     #[test]
@@ -1200,11 +1237,20 @@ mod tests {
     #[test]
     fn test_encrypt() {
         let mut compress = false;
-        for (idx, key) in TV_KEY[..5].iter().enumerate() { // the last four are ec-multiply
-            if idx > 2 { compress = true }
-            assert_eq!(key.encrypt(TV_PASS[idx], compress).unwrap(), TV_ENCRYPTED[idx]);
+        for (idx, key) in TV_KEY[..5].iter().enumerate() {
+            // the last four are ec-multiply
+            if idx > 2 {
+                compress = true
+            }
+            assert_eq!(
+                key.encrypt(TV_PASS[idx], compress).unwrap(),
+                TV_ENCRYPTED[idx]
+            );
         }
-        assert_eq!([0x00; 32].encrypt("I'm_a_passphrase", true), Err(Error::PrvKey));
+        assert_eq!(
+            [0x00; 32].encrypt("I'm_a_passphrase", true),
+            Err(Error::PrvKey)
+        );
     }
 
     #[test]
@@ -1212,9 +1258,18 @@ mod tests {
         for (idx, wif) in TV_WIF[..5].iter().enumerate() {
             assert_eq!(wif.encrypt_wif(TV_PASS[idx]).unwrap(), TV_ENCRYPTED[idx]);
         }
-        assert_eq!([TV_WIF[0], "a"].concat().encrypt_wif(TV_PASS[0]), Err(Error::WifKey));
-        assert_eq!(TV_WIF[0].replace('X', "!").encrypt_wif(TV_PASS[0]), Err(Error::Base58));
-        assert_eq!(TV_WIF[0].replace('X', "x").encrypt_wif(TV_PASS[0]), Err(Error::Checksum));
+        assert_eq!(
+            [TV_WIF[0], "a"].concat().encrypt_wif(TV_PASS[0]),
+            Err(Error::WifKey)
+        );
+        assert_eq!(
+            TV_WIF[0].replace('X', "!").encrypt_wif(TV_PASS[0]),
+            Err(Error::Base58)
+        );
+        assert_eq!(
+            TV_WIF[0].replace('X', "x").encrypt_wif(TV_PASS[0]),
+            Err(Error::Checksum)
+        );
         assert_eq!(
             "KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73NUBByJr".encrypt_wif("pass"), // zeroed
             Err(Error::PrvKey)
@@ -1223,10 +1278,21 @@ mod tests {
 
     #[test]
     fn test_generate() {
-        assert!("バンドメイド".generate(true).unwrap().decrypt("バンドメイド").is_ok());
-        assert!("くるっぽー！".generate(false).unwrap() .decrypt("くるっぽー！").is_ok());
+        assert!("バンドメイド"
+            .generate(true)
+            .unwrap()
+            .decrypt("バンドメイド")
+            .is_ok());
+        assert!("くるっぽー！"
+            .generate(false)
+            .unwrap()
+            .decrypt("くるっぽー！")
+            .is_ok());
         assert_eq!(
-            "something_really_dumb".generate(true).unwrap().decrypt("rocket_science"),
+            "something_really_dumb"
+                .generate(true)
+                .unwrap()
+                .decrypt("rocket_science"),
             Err(Error::Pass)
         );
         assert_eq!("a".generate(false).unwrap().decrypt("b"), Err(Error::Pass));
@@ -1262,7 +1328,9 @@ mod tests {
                 0x03, 0x4f, 0x35, 0x5b, 0xdc, 0xb7, 0xcc, 0x0a, 0xf7, 0x28, 0xef, 0x3c, 0xce, 0xb9,
                 0x61, 0x5d, 0x90, 0x68, 0x4b, 0xb5, 0xb2, 0xca, 0x5f, 0x85, 0x9a, 0xb0, 0xf0, 0xb7,
                 0x04, 0x07, 0x58, 0x71, 0xaa
-            ].p2wpkh().unwrap(),
+            ]
+            .p2wpkh()
+            .unwrap(),
             "1Q1pE5vPGEEMqRcVRMbtBK842Y6Pzo6nK9"
         );
         assert_eq!(
@@ -1270,7 +1338,9 @@ mod tests {
                 0x02, 0x66, 0x6b, 0xdf, 0x20, 0x25, 0xe3, 0x2f, 0x41, 0x08, 0x88, 0x99, 0xf2, 0xbc,
                 0xb4, 0xbf, 0x69, 0x83, 0x18, 0x7f, 0x38, 0x0e, 0x72, 0xfc, 0x7d, 0xee, 0x11, 0x5b,
                 0x1f, 0x99, 0x57, 0xcc, 0x72
-            ].p2wpkh().unwrap(),
+            ]
+            .p2wpkh()
+            .unwrap(),
             "1N7qxowv8SnfdBYhmvpxZxyjsYQDPd88ES"
         );
         assert_eq!(
@@ -1280,7 +1350,9 @@ mod tests {
                 0x04, 0x07, 0x58, 0x71, 0xaa, 0x38, 0x5b, 0x6b, 0x1b, 0x8e, 0xad, 0x80, 0x9c, 0xa6,
                 0x74, 0x54, 0xd9, 0x68, 0x3f, 0xcf, 0x2b, 0xa0, 0x34, 0x56, 0xd6, 0xfe, 0x2c, 0x4a,
                 0xbe, 0x2b, 0x07, 0xf0, 0xfb, 0xdb, 0xb2, 0xf1, 0xc1
-            ].p2wpkh().unwrap(),
+            ]
+            .p2wpkh()
+            .unwrap(),
             "1MsHWS1BnwMc3tLE8G35UXsS58fKipzB7a"
         );
         assert_eq!(
@@ -1290,7 +1362,9 @@ mod tests {
                 0x1f, 0x99, 0x57, 0xcc, 0x72, 0x9d, 0xd9, 0x76, 0x13, 0x1c, 0x4c, 0x8e, 0x12, 0xab,
                 0x10, 0x83, 0xca, 0x06, 0x54, 0xca, 0x5f, 0xdb, 0xca, 0xc8, 0xd3, 0x19, 0x8d, 0xaf,
                 0x90, 0xf5, 0x81, 0xb5, 0x91, 0xd5, 0x63, 0x79, 0xca
-            ].p2wpkh().unwrap(),
+            ]
+            .p2wpkh()
+            .unwrap(),
             "17iS4e5ib2t2Bj2UFjPbxSDdmecHNnCAwy"
         );
     }
@@ -1337,10 +1411,25 @@ mod tests {
 
     #[test]
     fn test_wif() {
-        assert_eq!([0x11; 32].wif(true), "KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp");
-        assert_eq!([0x11; 32].wif(false), "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh");
-        assert_eq!([0x69; 32].wif(true), "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9");
-        assert_eq!([0x69; 32].wif(false), "5JciBbkdYdjKKE9rwZ7c1XscwwcLBbv9aJyeZeWQi2gZnHeiX57");
-        assert_eq!([0xd0; 32].wif(true), "L4DczGWRanBGXnun83Fs9HcPCaXXq7ngxZrBY13Phdsw36WU1rQA");
+        assert_eq!(
+            [0x11; 32].wif(true),
+            "KwntMbt59tTsj8xqpqYqRRWufyjGunvhSyeMo3NTYpFYzZbXJ5Hp"
+        );
+        assert_eq!(
+            [0x11; 32].wif(false),
+            "5HwoXVkHoRM8sL2KmNRS217n1g8mPPBomrY7yehCuXC1115WWsh"
+        );
+        assert_eq!(
+            [0x69; 32].wif(true),
+            "KzkcmnPaJd7mqT47Rnk9XMGRfW2wfo7ar2M2o6Yoe6Rdgbg2bHM9"
+        );
+        assert_eq!(
+            [0x69; 32].wif(false),
+            "5JciBbkdYdjKKE9rwZ7c1XscwwcLBbv9aJyeZeWQi2gZnHeiX57"
+        );
+        assert_eq!(
+            [0xd0; 32].wif(true),
+            "L4DczGWRanBGXnun83Fs9HcPCaXXq7ngxZrBY13Phdsw36WU1rQA"
+        );
     }
 }
